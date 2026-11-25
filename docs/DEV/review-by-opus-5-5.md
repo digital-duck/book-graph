@@ -763,3 +763,79 @@ instead of a shell script").
 - **Set a real title first.** The older repos' titles say "ConceptBook" (§12.4): set `site.title` before publishing them.
 - **Still to do:** `serve` (the local API behind Generate/PDF/Settings), resumable book runs, ingestion, and the §9.2
   items 6–7.
+
+---
+
+## 14. Build plan, step 7: serve (Opus 5.5, 2026-11-25)
+
+### 14.1 Design
+
+The web app calls a local API for Generate, Export PDF and Settings. Today that is concept-book-base's FastAPI backend
+(`api/`, about 700 lines), which shells out to `spl3 run build_concept_book.spl`. `bgr serve` replaces it while keeping
+the **same endpoints and shapes**, so `web/` is unchanged:
+
+| Endpoint | book-graph |
+|---|---|
+| `GET /api/generate` (SSE: `started`, `log`, `done`, `gen_error`) | `generate_chapter` (the recipe) in-process. Recipe events become log lines: the teaching order, one line per section ("budget: generated -> concept_budget.html"), the model calls, the book page. A failure is always a `gen_error` event, never a dropped stream. A second request for the same chapter variant is refused while one runs. If the browser leaves, generation still finishes and caches. |
+| `GET /api/pdf` | concept-book-base's `html2pdf.js` (copied as `html2pdf.mjs`), run next to the shared `node_modules` (Playwright). The PDF goes into the library chapter's `output/<variant>/pdf/`, and the catalog now lists `pdfs` from disk. |
+| `GET`/`PUT /api/settings`, `/api/settings/ollama-models` | the same fields. The Settings page's `google` adapter maps to dd-llm's `gemini` (`GEMINI_API_KEY`). `spl_max_llm_calls` caps generation; `spl_while_max_iter` is kept for the form, but GraphLang's loops are bounded by the graph. |
+| `GET /api/domains`, `/api/domains/<id>/status` | the same, from the live catalog. |
+
+- **One process, one origin.** The built app is served at the site's base path, and `<base>domains/` is served **live
+  from the library**. `catalog.json` is recomputed per request, and pages are read from the chapter folders, so a page
+  generated a moment ago is there on the next request. The old setup copied files and patched `catalog.json` after each
+  run.
+- **The standard library, not FastAPI.** `ThreadingHTTPServer`, plus an SSE writer fed from a queue. That adds no
+  dependencies (fastapi, uvicorn, sse-starlette, pydantic-settings, python-dotenv) for six small endpoints, and the
+  request checks are explicit.
+- **Generation model.** A model folder must be one of the book's models, or the Settings LLM's folder. Anything else is a
+  `gen_error` naming both.
+
+### 14.2 Security: kept, and tightened (plan §5: "do not relax")
+
+- **Kept:**
+  - it binds `127.0.0.1` only, with no `--host` option;
+  - settings, API keys included, live in memory only;
+  - a key is never sent back, only the `*_api_key_set` flags (a key already exported in the environment counts as set,
+    as before);
+  - every query value that names a path must be a safe segment.
+- **Tightened:**
+  - the `Host` header must be this server, so DNS rebinding gets a 421;
+  - `/api` requests must be same-origin, judged by `Origin` and `Sec-Fetch-Site`. The old API relied on CORS, which
+    stops another site from *reading* a response but not from *sending* the request. Since `GET /api/generate` spends
+    model calls, a crafted `<img>` or `EventSource` on any open website could start a paid generation. Now it gets a 403;
+  - `PUT` needs `Content-Type: application/json`;
+  - every file served is resolved and checked to be inside its root;
+  - keys are set in this process only. Recipe SOLVE steps still see only `PATH`/`PYTHONUTF8`, so a key never reaches a
+    step.
+
+### 14.3 Verified
+
+- **`tests/test_serve.py`**: 9 tests over real HTTP on 127.0.0.1, with the scripted model. They cover:
+  - the live site and its domains;
+  - path traversal attempts, which get 404;
+  - generation streamed as SSE, with its pages then appearing live, and a cache hit on the second run;
+  - error events for an unknown chapter, model, target or level;
+  - cross-site and foreign-`Origin` requests refused (and nothing ran);
+  - a wrong `Host` refused;
+  - Settings: keys never echoed, set and cleared in the environment, and the `google:` mapping (generating with the
+    Settings LLM's folder);
+  - the domains API, and the PDF "Generate it first" case.
+- **In Chromium** (opt-in, `BOOKGRAPH_WEB_TESTS=1`, `tests/web/serve_smoke.mjs`): the built app against `serve`.
+  - Selecting a node and clicking **Generate** streams the log to "✓ Done".
+  - The new page appears in the content panel.
+  - **Export PDF** produces `output/core.en/sonnet/pdf/concept_budget.pdf`, served as `application/pdf` (`%PDF-`).
+- **`bgr serve` on a migrated cb-meta-health**, without generating: 9 chapters and 856 concept pages served live;
+  listening on `127.0.0.1:8765` only; a wrong `Host` gets 421.
+- `pytest`: 75 passed, plus 2 opt-in. The opt-in browser tests pass as well (16 in `test_build.py` and `test_serve.py`).
+
+### 14.4 Still open
+
+- **Resumable book runs** (9.2-5): neither `bgr generate` nor `serve` exposes checkpoints. A failed run restarts, mostly
+  from the cache.
+- **Ingestion and extraction** from PDFs (concept-book-press, plan Phase 4).
+- **The §9.2 items 6–7:** replay checks and `verify_section`, and the extra `validate` checks.
+- **Development of `web/` itself.** `serve` uses the built bundle, so changing `web/` needs a restart. `vite dev` with
+  its `/api` proxy pointed at `serve` does **not** work as is: the proxy forwards the dev server's `Origin` and `Host`
+  (localhost:5173), which `serve`'s checks refuse. Supporting it needs an explicit opt-in, such as
+  `--dev-origin http://localhost:5173`. Not done yet.

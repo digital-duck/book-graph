@@ -40,7 +40,7 @@ from .paths import book_dir, lang_suffix, safe_segment
 
 # Fields computed from the graph and the files on disk; every other catalog field comes from book.yaml as it is.
 COMPUTED = ("id", "capstone", "nodes", "edges", "primitives", "concepts", "applications", "has_navigator", "has_book", "books",
-            "generated_concepts")
+            "generated_concepts", "pdfs")
 _ORDER = ("id", "name", "description", "capstone", "nodes", "edges", "primitives", "concepts", "applications", "tags",
           "default_level", "has_navigator", "has_book", "books", "generated_concepts")
 
@@ -76,6 +76,22 @@ def _pages(chapter_root: Path) -> tuple[list[dict[str, str]], list[dict[str, str
     return books, concepts
 
 
+def _pdfs(chapter_root: Path) -> list[dict[str, str]]:
+    """The exported PDFs (`bookgraph serve`'s Export PDF), as the apps' catalog lists them: output/<level>.<lang>[/<model>]/pdf/."""
+    out = chapter_root / "output"
+    files = sorted(out.glob("*/*/pdf/*.pdf")) + sorted(out.glob("*/pdf/*.pdf")) if out.is_dir() else []
+    found = []
+    for f in files:
+        rel = f.relative_to(chapter_root).parts
+        level, _, lang = rel[1].partition(".")
+        name = f.stem.partition("_")[2]
+        suffix = lang_suffix(lang)
+        if suffix and name.endswith(suffix):
+            name = name[: -len(suffix)]
+        found.append({"target": name, "level": level, "language": lang, "model": rel[2] if len(rel) == 5 else "", "file": "/".join(rel)})
+    return found
+
+
 def chapter_entry(book: Book, ch: Any) -> dict[str, Any]:
     """One chapter's catalog.json entry."""
     entry: dict[str, Any] = dict(ch.catalog)
@@ -91,6 +107,10 @@ def chapter_entry(book: Book, ch: Any) -> dict[str, Any]:
     entry.update(id=book.global_id(ch), capstone=ch.capstone or g.default_target(), **graph_stats(g.data),
                  has_navigator=(book.chapter_root(ch) / "output" / "graph.html").is_file(), has_book=bool(books), books=books,
                  generated_concepts=concepts)
+    if pdfs := _pdfs(book.chapter_root(ch)):
+        entry["pdfs"] = pdfs
+    else:
+        entry.pop("pdfs", None)
     return {**{k: entry[k] for k in _ORDER if k in entry}, **{k: v for k, v in entry.items() if k not in _ORDER}}
 
 

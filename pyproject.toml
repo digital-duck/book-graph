@@ -41,7 +41,7 @@ bgr = "bookgraph.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-bookgraph = ["recipes/**/*.yaml", "recipes/**/*.md", "recipes/**/*.cedar", "web/**/*", "web/public/.nojekyll"]
+bookgraph = ["recipes/**/*.yaml", "recipes/**/*.md", "recipes/**/*.cedar", "web/**/*", "web/public/.nojekyll", "html2pdf.mjs"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

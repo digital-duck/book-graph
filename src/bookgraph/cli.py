@@ -234,6 +234,29 @@ def publish(library: Path, target: str, dry_run: bool, yes: bool, no_build: bool
 
 
 @main.command()
+@click.argument("target")
+@click.option("--port", "-p", type=int, default=8200, show_default=True, help="on 127.0.0.1 only")
+@click.option("--no-build", is_flag=True, help="serve the app already built in --out instead of building it first")
+@click.option("--out", "-o", default="", help="the built app (default: <book>/dist)")
+@click.pass_obj
+@_guard
+def serve(library: Path, target: str, port: int, no_build: bool, out: str) -> None:
+    """Serve a book's site on 127.0.0.1 with the local API behind Generate, Export PDF and Settings. Content is served live
+    from the library, so generated pages appear at once. Settings (API keys included) live in memory only."""
+    from .build import build_site, site_base
+    from .serve import HOST, serve as run
+    book = load_book(_find_book(target, library))
+    site = Path(out).expanduser() if out else book.root / "dist"
+    if not no_build:
+        build_site(book, site, log=lambda m: click.echo(m, err=True))
+    click.echo(f"serving {book.press}/{book.book} at http://{HOST}:{port}{site_base(book)}  (Ctrl-C to stop)")
+    try:
+        run(book, site, port=port)
+    except KeyboardInterrupt:
+        pass
+
+
+@main.command()
 @click.argument("repo", type=click.Path(exists=True, file_okay=False))
 @click.option("--press", default="digital-duck", show_default=True)
 @click.option("--book", "slug", default="", help="the book slug (default: the repo name without `cb-`)")
