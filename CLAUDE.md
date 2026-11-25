@@ -30,7 +30,7 @@ a `risky: true` step is reachable only through a GUARD's `allow`; a step cannot 
 
 ## Known gaps vs. the SPL workflow
 
-- The symbolic `verify_section` (sympy/z3 per domain) is not ported; only the primitive-budget check runs.
+- The SPL's `verify_section` is not ported because it never checked anything: `graph_lib.verify_content` only imports sympy (its claim check is a TODO) and always passed, and the exact verifiers in `graph_lib.py` (right triangle, momentum, ...) were never called. Only the primitive-budget check runs. A real check would be new behaviour (and new refinement calls), not a port.
 - The section cache has its own key scheme (language, style, full `adapter:model`, a hash of label+defines, and a salt over the prompt files, style guide and budget). An SPL app's spl3 cache is read, never written, through `legacy.py` when `book.yaml` sets `legacy_cache:`; a section hit is copied into `.bg_cache`, and a payoff hit is read again on each run.
 - Model output is untrusted: `render.py` escapes all text, mermaid and display math, and passes only one exact `<figure>` shape. Keep it so when touching the converter.
 - The navigator (`output/graph.html`) is `navigator.py`: concept-book-base's `concept_graph.py` page, ported **verbatim** (byte-identical; the app's GraphViewer.js scripts it through `frame.contentWindow`, so do not restyle it or swap in zinet's cytoscape page). It is rewritten when the graph's hash differs from `<chapter>/.navigator`; a migrated chapter keeps its own page until its graph changes.

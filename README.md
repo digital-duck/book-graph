@@ -51,7 +51,7 @@ chapters:
 | Command | Purpose |
 |---|---|
 | `bgr new PRESS BOOK` | scaffold a book |
-| `bgr validate TARGET` | a graph.yaml, or every chapter of a book; exit 1 on any problem |
+| `bgr validate TARGET [--strict]` | a graph.yaml, or every chapter of a book (incl. each capstone is a node); warnings for a non-application capstone and tiers that do not rise; exit 1 on a problem (or a warning, with --strict) |
 | `bgr order GRAPH [--target NODE]` | the order sections are written in |
 | `bgr generate TARGET [-c CHAPTER] [--level L] [--lang X] [--llm A:M] [--skip-cache] [--max-llm-calls N] [--budget N]` | run the `generate_chapter` recipe for every chapter x level x language x model, as a resumable run |
 | `bgr generate TARGET --resume last [--budget N]` | continue a run that stopped (a failure, its budget, Ctrl-C): only what is not done runs, and finished sections come from the cache |

@@ -127,6 +127,29 @@ class ChapterGraph:
                 found.append(p)
         return found
 
+    def check_target(self, target: str) -> tuple[list[str], list[str]]:
+        """(problems, warnings) for writing toward `target` (a chapter's capstone): it must be a node; a target that is not
+        an application gets no payoff."""
+        if not target:
+            return [], []
+        if target not in self.G or "kind" not in self.G.nodes[target]:
+            return [f"capstone {target!r} is not a node of this graph"], []
+        if self.kind(target) != "application":
+            return [], [f"capstone {target!r} is a {self.kind(target)}, not an application: its book gets no payoff"]
+        return [], []
+
+    def warnings(self) -> list[str]:
+        """Soft problems: the graph can be generated from, but something in it is inconsistent. Today: a `tier` that does not
+        rise along an edge (a prerequisite at the same or a higher tier than the node that needs it)."""
+        tier = {n: (self.node(n) or {}).get("tier") for n in self.G}
+        bad = sorted((u, v) for u, v in self.G.edges() if isinstance(tier.get(u), (int, float)) and isinstance(tier.get(v), (int, float))
+                     and tier[u] >= tier[v])
+        if not bad:
+            return []
+        shown = ", ".join(f"{u} (tier {tier[u]}) -> {v} (tier {tier[v]})" for u, v in bad[:5])
+        return [f"{len(bad)} prerequisite(s) at the same or a higher tier than the node that needs them: {shown}"
+                + (", ..." if len(bad) > 5 else "")]
+
     def validate(self) -> list[str]:
         """Hard problems, as messages; empty when the graph can be generated from."""
         problems: list[str] = []

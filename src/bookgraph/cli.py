@@ -81,28 +81,40 @@ def new(library: Path, press: str, book: str, title: str) -> None:
 @main.command()
 @click.argument("target")
 @click.option("--format", "fmt", type=click.Choice(["text", "json"]), default="text")
+@click.option("--strict", is_flag=True, help="fail on warnings too")
 @click.pass_obj
 @_guard
-def validate(library: Path, target: str, fmt: str) -> None:
-    """Check a graph.yaml, or every chapter graph of a book (book.yaml, folder or press/book). Exit 1 on any problem."""
+def validate(library: Path, target: str, fmt: str, strict: bool) -> None:
+    """Check a graph.yaml, or every chapter graph of a book (book.yaml, folder or press/book): acyclic, declared, reducible to
+    primitives, every node defined, no id declared twice, and each chapter's capstone a node of its graph. Warnings (a
+    capstone that is not an application, tiers that do not rise along an edge) do not fail unless --strict. Exit 1 on a
+    problem."""
     p = Path(target).expanduser()
     results: list[dict] = []
     if p.is_file() and p.name != "book.yaml":
-        paths = [("", p)]
+        paths = [("", p, "")]
     else:
         book = load_book(_find_book(target, library))
-        paths = [(c.id, book.graph_path(c)) for c in book.chapters]
-    for name, gp in paths:
+        paths = [(c.id, book.graph_path(c), c.capstone) for c in book.chapters]
+    for name, gp, capstone in paths:
+        warnings: list[str] = []
         try:
-            problems = load_graph(gp).validate()
+            g = load_graph(gp)
+            problems = g.validate()
+            if not problems:
+                more, warn = g.check_target(capstone)
+                problems, warnings = problems + more, warn + g.warnings()
         except BookError as e:
             problems = [str(e)]
-        results.append({"chapter": name or str(gp), "ok": not problems, "problems": problems})
+        ok = not problems and not (strict and warnings)
+        results.append({"chapter": name or str(gp), "ok": ok, "problems": problems, "warnings": warnings})
     if fmt == "json":
         click.echo(json.dumps(results, indent=1))
     else:
         for r in results:
-            click.echo(f"{'ok  ' if r['ok'] else 'FAIL'} {r['chapter']}" + ("" if r["ok"] else ": " + "; ".join(r["problems"])))
+            click.echo(f"{'ok  ' if r['ok'] else 'FAIL'} {r['chapter']}" + ("" if not r["problems"] else ": " + "; ".join(r["problems"])))
+            for w in r["warnings"]:
+                click.echo(f"     warning: {w}")
     if not all(r["ok"] for r in results):
         sys.exit(1)
 

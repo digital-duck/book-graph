@@ -903,3 +903,40 @@ checkpoints are not used, and the resumable unit is a book run.
   and a later `--resume`.
 - **Still open:** ingestion and extraction (plan Phase 4), replay checks and `verify_section`, and the extra `validate`
   checks (§9.2 items 6–7).
+
+---
+
+## 16. Build plan, step 9: `verify_section` and `validate` (Opus 5.5, 2026-11-25)
+
+### 16.1 `verify_section`: nothing to port
+
+The SPL loop runs `verify_section(@section, @domain_yaml)` after the primitive-budget check, and refines on a failure. I
+read the code behind it:
+
+- `tools.verify_section` calls `graph_lib.verify_content(section, data)`, which **only checks that sympy can be imported**.
+  The claim check itself is `# TODO: parse claims from section and recompute per-domain`, and the function returns
+  `"pass"`.
+- The exact verifiers in `graph_lib.py` (`verify_right_triangle`, `verify_momentum_conservation`,
+  `verify_balanced_equation`, …) are **never called** by the concept-book pipeline.
+- The 308 nodes in the 260 graphs that declare `verifier:` (sympy, structural, lean|sympy, …) never reach a check.
+
+So in the SPL workflow this step always passed and never caused a refinement, and porting it would change nothing.
+CLAUDE.md now says so. A real claim check (for example, re-computing worked examples with sympy) would be *new*
+behaviour that costs refinement calls, so it is a product decision, not a port.
+
+### 16.2 `validate`: checks chosen by what they find in the real graphs
+
+The plan lists "acyclic, reducible, connected, tiers". I measured each candidate on the 260 graphs before adding it:
+
+| Check | Finds | Decision |
+|---|---|---|
+| the chapter's capstone is a node of its graph | **3** chapters, all in cb-world-powers: `200years_7powers_ch06` (`china_1945_japan_s_surrender`), `ch12` (`russia_2024_navalny_s_death_putin_s`), `ch14` (`china_2025_deepseek_china_s_ai_competitiveness`) | **error.** Generating these chapters fails today; their capstone ids look truncated. Fix them in the data. |
+| the capstone is an application | 18 | **warning:** that book gets no payoff |
+| `tier` rises along every edge | 19 graphs, 31 edges (e.g. `black_height_property` (tier 1) → `red_black_tree` (tier 1)) | **warning** |
+| every node is needed by the capstone | 235 graphs, 5,366 nodes | not added: chapters normally have several applications |
+| the graph is in one piece | 95 graphs | not added: common, and not wrong |
+
+- `bgr validate` prints warnings under each chapter and exits 0. `--strict` makes them fail, and `--format json` adds a
+  `warnings` list.
+- New: `ChapterGraph.check_target()` and `warnings()`.
+- Tests: `tests/test_validate.py`, 4 tests.
