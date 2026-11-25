@@ -1053,3 +1053,64 @@ I checked them against press's own functions:
 
 `ingest`: OpenStax HTML and PDF → `chunks.yaml`, press's `pipeline/ingest/`, which needs requests, BeautifulSoup and
 PyMuPDF.
+
+---
+
+## 19. Build plan, step 12: Phase 4, part 3: `ingest` (Opus 5.5, 2026-11-25)
+
+### 19.1 Scope
+
+concept-book-press has two ingesters: PDF (`pipeline/ingest/pdf.py`) and OpenStax HTML (`openstax.py`, which fetches
+openstax.org pages). Its publish pipeline uses the PDF one (`run_graph_stage` passes `--source pdf`), and OpenStax books
+download as PDFs. So **the PDF ingester is ported and the HTML one is not.**
+
+### 19.2 What was added
+
+- **`ingest.py`:** press's `pdf.py`, copied programmatically. The only change is that its `print` progress goes through
+  a `_log` hook. It does what press did:
+  - chapters from the PDF's level-1 bookmarks ("Chapter N", or by position for books without that prefix, skipping
+    front and back matter);
+  - sections from the level-2 bookmarks, skipping Glossary, Summary and the like;
+  - one chunk per section, with page numbers, "Chapter N" headers and "Access for free" footers removed;
+  - an attribution (OpenStax CC BY 4.0 by default, or `--attribution`).
+- **`bgr ingest TARGET --pdf FILE --chapter N [--id ID] [--attribution] [--force]`** writes
+  `<book>/chapters/<id>/chunks.yaml`, and adds the chapter to book.yaml (title from the PDF). `--list` shows the PDF's
+  chapters. The book.yaml edit:
+  - appends only when `chapters:` is the file's last block, as `new` and `migrate` write it, keeping the rest of the file
+    and its comments untouched;
+  - checks that the result still loads, and otherwise prints the line to add;
+  - never overwrites an existing `chunks.yaml` without `--force`.
+- **The license.** PyMuPDF is **AGPL-3.0**, and book-graph is Apache-2.0. As in press, it is an optional extra
+  (`pip install "book-graph[ingest]"`), imported only by `bgr ingest`, which explains how to install it when it is
+  missing. I installed it (2.1) into the `graf` environment to test; `pip uninstall pymupdf` reverses that. **Whether an
+  AGPL extra is acceptable for the project is your call.** pypdf (BSD) is the alternative, but its text differs, so the
+  chunks, and hence the extraction prompts, would no longer match press's.
+
+### 19.3 Verified
+
+- **Against press's own output.** Our port run on press's two source PDFs, compared with every `chunks.yaml` press saved
+  from them: **55 chapters** (21 chemistry-2e, 34 college-physics-2e). The chapter numbers and titles, section ids, page
+  ranges, attribution and metadata are identical, and the text is identical **except for whitespace**. PyMuPDF 2.1
+  inserts some spaces that the 1.x press used in June did not, which is a library difference and not a port difference.
+- **End to end on a real PDF.** `bgr new`, then `bgr ingest --list` (21 chapters), then `bgr ingest --chapter 3` (6
+  sections, 81k characters, chapter appended to book.yaml). `validate` then correctly reports the chapter as having no
+  graph yet, and `bgr extract` with GraphLang's offline mock model stops cleanly at `unreadable` after 1 call.
+- `tests/test_ingest.py` (4 tests, skipped without PyMuPDF):
+  - a PDF built in the test, with front matter, a skipped Glossary, a page number and an OpenStax footer;
+  - the CLI adding a chapter, refusing to overwrite, and recognizing a chapter already listed;
+  - `add_chapter` refusing when `chapters:` is not last;
+  - parity with press on college-physics-2e ch1, whitespace aside (skipped when press is not checked out).
+- `pytest`: 100 passed, plus 2 opt-in.
+
+### 19.4 Where Phase 4 stands
+
+- **Done:** PDF → `chunks.yaml` (`ingest`), `chunks.yaml` → `graph.yaml` (`extract`), and cross-chapter recaps at
+  generation (`registry`).
+- **Not done:**
+  - the OpenStax-HTML ingester (by choice; see 19.1);
+  - press's `level_map` and its SQLite stage tracker, which resumable runs (§15) replace;
+  - **a real-model `extract`**. Everything was tested with scripted models, and on press's 190 real extracted graphs as
+    pass-2 answers, but the two prompts have not been run here against a live model. That costs about 3 calls per
+    chapter (pass 1 up to about 170k characters), so try one chapter before a book.
+- **With this, every command in the plan's §2.5 exists except `run`** (the whole chain in one command). Today it is
+  `ingest` → `extract` → `validate` → `generate` → `build` → `publish`.

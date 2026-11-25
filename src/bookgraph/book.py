@@ -178,3 +178,25 @@ def scaffold_book(library: Path, press: str, book: str, title: str = "") -> Path
                                     encoding="utf-8")
     (root / "chapters" / "ch01" / "graph.yaml").write_text(NEW_GRAPH.format(book=book), encoding="utf-8")
     return root
+
+
+def add_chapter(book_yaml: Path, chapter_id: str, title: str) -> bool:
+    """Append a chapter to book.yaml when `chapters:` is its last top-level block (as `new` and `migrate` write it), keeping
+    the rest of the file (comments included) as it is. Returns False, changing nothing, when that is not the case or when
+    the result would not load."""
+    import json
+    path = Path(book_yaml)
+    text = path.read_text(encoding="utf-8")
+    keys = [line.split(":", 1)[0] for line in text.splitlines() if line and not line[0].isspace() and not line.startswith("#")
+            and ":" in line]
+    if not keys or keys[-1] != "chapters":
+        return False
+    entry = f"  - {{id: {safe_segment(chapter_id, 'chapter')}, title: {json.dumps(title, ensure_ascii=False)}, graph: chapters/{chapter_id}/graph.yaml}}\n"
+    new = text if text.endswith("\n") else text + "\n"
+    path.write_text(new + entry, encoding="utf-8")
+    try:
+        load_book(path)
+    except BookError:
+        path.write_text(text, encoding="utf-8")
+        return False
+    return True

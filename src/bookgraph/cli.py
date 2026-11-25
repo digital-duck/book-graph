@@ -306,6 +306,52 @@ def serve(library: Path, target: str, port: int, no_build: bool, out: str) -> No
 
 @main.command()
 @click.argument("target")
+@click.option("--pdf", "pdf", required=True, type=click.Path(exists=True, dir_okay=False), help="the textbook PDF (with bookmarks)")
+@click.option("--chapter", "number", type=int, default=None, help="the chapter number, as `--list` shows it")
+@click.option("--id", "cid", default="", help="the chapter id in book.yaml (default: chNN)")
+@click.option("--list", "list_only", is_flag=True, help="list the PDF's chapters and stop")
+@click.option("--attribution", default=None, help="the source attribution (default: OpenStax, CC BY 4.0, as in press)")
+@click.option("--force", is_flag=True, help="replace an existing chunks.yaml")
+@click.pass_obj
+@_guard
+def ingest(library: Path, target: str, pdf: str, number, cid: str, list_only: bool, attribution, force: bool) -> None:
+    """Read one chapter of a PDF textbook into the book: <chapter>/chunks.yaml, one chunk per section (concept-book-press's
+    PDF ingester), and the chapter in book.yaml. Then `bookgraph extract`. Needs PyMuPDF: pip install "book-graph[ingest]"."""
+    try:
+        from . import ingest as ing
+    except ImportError as e:
+        raise click.ClickException(f"bookgraph ingest needs PyMuPDF ({e}): pip install \"book-graph[ingest]\"")
+    if list_only:
+        for num, title, page in ing.list_chapters(pdf):
+            click.echo(f"{num:3d}  p.{page:<5d} {title}")
+        return
+    if number is None:
+        raise click.UsageError("give --chapter N (see --list)")
+    book = load_book(_find_book(target, library))
+    cid = safe_segment(cid or f"ch{number:02d}", "chapter")
+    dest = book.root / "chapters" / cid / "chunks.yaml"
+    if dest.exists() and not force:
+        raise click.ClickException(f"{dest} already exists: pass --force to read the chapter again")
+    ing._log = lambda *a, **k: click.echo(" ".join(str(x) for x in a), err=True)
+    try:
+        content = ing.ingest_chapter(pdf, number, attribution=attribution)
+    except ValueError as e:
+        raise click.ClickException(str(e))
+    content.save_yaml(dest)
+    click.echo(f"wrote {dest}: {len(content.chunks)} section(s), {sum(len(c.text) for c in content.chunks)} characters")
+    if any(c.id == cid for c in book.chapters):
+        click.echo(f"chapter {cid} is already in book.yaml; next: bookgraph extract {target} -c {cid}")
+        return
+    from .book import add_chapter
+    if add_chapter(book.root / "book.yaml", cid, content.chapter_title):
+        click.echo(f"added chapter {cid} ({content.chapter_title}) to book.yaml; next: bookgraph extract {target} -c {cid}")
+    else:
+        click.echo(f"add this chapter to book.yaml's chapters:, then run bookgraph extract {target} -c {cid}\n"
+                   f"  - {{id: {cid}, title: {json.dumps(content.chapter_title, ensure_ascii=False)}, graph: chapters/{cid}/graph.yaml}}")
+
+
+@main.command()
+@click.argument("target")
 @click.option("--chapter", "-c", "chapter", required=True, help="the chapter (book.yaml id)")
 @click.option("--chunks", default="", help="a chunks.yaml (default: <chapter>/chunks.yaml, written by `bookgraph ingest`)")
 @click.option("--llm", "model", default="", help="ADAPTER:MODEL (default: the book's first model)")
