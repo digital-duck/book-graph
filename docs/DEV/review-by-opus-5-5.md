@@ -1114,3 +1114,87 @@ download as PDFs. So **the PDF ingester is ported and the HTML one is not.**
     chapter (pass 1 up to about 170k characters), so try one chapter before a book.
 - **With this, every command in the plan's §2.5 exists except `run`** (the whole chain in one command). Today it is
   `ingest` → `extract` → `validate` → `generate` → `build` → `publish`.
+
+---
+
+## 20. The asynchronous pipeline, with manifests and review at every step (Opus 5.5, 2026-11-25)
+
+### 20.1 What was asked, and the decisions made
+
+The request: let each step write a `STEP.out.yaml` that proves it completed (OK or NOT_OK) and triggers the next step,
+so the pipeline can run asynchronously, resume from the step that failed, and support human review. Explicitly **no
+`run` command**. The decisions taken with WEN:
+
+- **Trigger: a dispatcher, `bgr next`.** No step knows about the next one.
+- **Numbered steps:** `1-ingest 2-extract 3-validate 4-generate 5-build 6-publish`.
+- **Two entry paths.** Path B extracts the graph from content. Path A starts from a graph authored by an expert, a
+  teacher or other means.
+- **Human review at every step.**
+
+### 20.2 Design (`pipeline.py`, `cli.py`)
+
+- **Paths.** A chapter with `source: {pdf: FILE, chapter: N[, attribution]}` in book.yaml is on path B
+  (1 → 2 → 3 → 4); any other chapter is on path A (3 → 4). `5-build` waits for every chapter's `4-generate`, and
+  `6-publish` waits for `5-build`.
+- **Manifests.** `<book>/pipeline/<chapter>/<step>.out.yaml`, or `<book>/pipeline/<step>.out.yaml` for 5 and 6, written
+  atomically. Each holds:
+  - step, chapter, run id, status (OK, NOT_OK, or RUNNING with a pid), started and finished, summary, error, details;
+  - **inputs:** fingerprints of what the step read (file hashes, a PDF by size and mtime, the config it used, the run id
+    of each step it builds on);
+  - **review:** pending, approved or rejected, with by, at and note.
+
+  A failing step still writes a NOT_OK manifest: an exception becomes the error.
+- **Readiness.** `bgr next` starts a step when the step before it is OK, **approved and current**, and its own manifest
+  is missing, stale (inputs changed), rejected, or marked for retry.
+  - "Current" was a design fix found by a test. Without it, editing a graph after its validation left the old approval
+    in force, so generation, and even the build, would have run on a graph nobody had reviewed. Now an approval counts
+    only while the step's inputs are unchanged, and a stale step blocks everything after it.
+- **Asynchronous.** `bgr next` launches each ready step as a detached process (`bgr pipeline-step`, internal), logging to
+  `<book>/pipeline/logs/`, and exits.
+  - `--parallel N` (default 2) caps the steps running at once, `--watch SECONDS` keeps dispatching, `--foreground` runs
+    them in-process, and `--dry-run` lists them.
+  - The dispatcher writes a RUNNING placeholder (with the pid, and the previous manifest kept inside it) so a second
+    dispatch cannot start the same step twice. A RUNNING manifest whose process is gone becomes NOT_OK.
+- **Resume.** A NOT_OK step is not rerun on its own. Fixing its input (the fingerprint then differs) or `bgr retry` makes
+  it ready again. A failed `4-generate` resumes its run ledger (§15), so what it finished is not paid for again (tested).
+- **Review.** Every step waits by default.
+  - `bgr approve STEP -c CH|all -m NOTE` approves an OK run; NOT_OK and RUNNING runs cannot be approved.
+  - `bgr reject` runs the step again: `2-extract` re-extracts, and `4-generate` regenerates with skip-cache.
+  - `bgr status` shows the grid of chapters × steps, what is ready and why the rest waits.
+  - `pipeline: {auto_approve: [steps]}` in book.yaml lets chosen steps through (empty unless set).
+  - The approval of `5-build` is publish's confirmation, because async mode has no terminal for the prompt.
+- **Steps reuse the existing commands:** `ingest_chapter`, `extract_chapter`, the `validate` checks, `generate_book`
+  for one chapter, `build_site`, `publish_site`.
+  - On a first run, `2-extract` adopts a `graph.yaml` that already exists (for review) instead of overwriting it.
+  - The direct commands (`bgr extract`, …) are unchanged and write no manifests. The pipeline sees their effects through
+    the input fingerprints.
+
+### 20.3 Verified
+
+- `tests/test_pipeline.py` (7 tests):
+  - path A end to end, waiting for review at every step (build and publish stubbed);
+  - a changed input reruns the step and blocks what follows;
+  - NOT_OK waits for a fix or a retry, and cannot be approved;
+  - a failed generate resumes its own run;
+  - reject reruns, and `auto_approve` lets a step through;
+  - path B: ingest from a generated PDF, then extract with a scripted model, with run ids chained through the inputs;
+  - **a real background dispatch** through the CLI (a detached process writes the manifest), plus `status`, `approve`,
+    and usage errors.
+- **On a migrated cb-meta-health (path A, 9 chapters):**
+  - `bgr next --parallel 2` ran the 9 validations as background processes in 6 dispatch rounds (7 s): 9 OK;
+  - `bgr status` showed them awaiting review;
+  - `bgr approve … 3-validate -c all -m …` recorded the approvals, after which `bgr next --dry-run` listed `4-generate`
+    for each chapter.
+
+  I stopped there on purpose: 4 of that book's sections are not in the legacy cache, so generating would spend model
+  calls.
+- `pytest`: 107 passed, plus 2 opt-in.
+
+### 20.4 Notes
+
+- **No `run` command,** by request. Steps stay independent, and `bgr next` only starts what the manifests say is ready.
+- **A rejection carries a note,** kept in the manifest, but the note does not yet reach the model. A rejected
+  `2-extract` simply extracts again (another sample). Feeding the reviewer's note into the repair or refinement prompt
+  would be the next improvement.
+- **Generation is per chapter.** `4-generate` covers all of a chapter's levels, languages and models in one run, so a
+  review approves a chapter's pages as a whole.

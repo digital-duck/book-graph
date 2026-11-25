@@ -40,6 +40,7 @@ class Chapter:
     global_id: str = ""             # the id outside the library (catalog.json, URLs, public/domains/<id>/); "" = <book>_<id>
     description: str = ""
     catalog: dict[str, Any] = field(default_factory=dict)   # extra catalog.json fields, exported unchanged (bookgraph.export)
+    source: dict[str, Any] = field(default_factory=dict)    # {pdf, chapter, attribution}: the pipeline's path B (bookgraph.pipeline)
 
 
 @dataclass
@@ -58,6 +59,7 @@ class Book:
     root: Path = field(default_factory=Path)          # the folder holding book.yaml
     legacy_cache: str = ""                            # absolute path of an SPL app's `spl/.spl` cache folder (bookgraph.legacy), or ""
     recap_earlier_chapters: bool = True               # a node an earlier chapter introduced gets a recap note (bookgraph.registry)
+    pipeline: dict[str, Any] = field(default_factory=dict)   # {auto_approve: [steps]}: bookgraph.pipeline (default: review every step)
 
     def chapter(self, chapter_id: str) -> Chapter:
         for c in self.chapters:
@@ -111,7 +113,8 @@ def load_book(path: str | Path) -> Book:
         chapters.append(Chapter(id=cid, title=str(c.get("title") or cid), graph=str(c.get("graph") or f"chapters/{cid}/graph.yaml"),
                                 capstone=str(c.get("capstone") or ""),
                                 global_id=safe_segment(str(c["global_id"]), "global_id") if c.get("global_id") else "",
-                                description=str(c.get("description") or ""), catalog=dict(extra)))
+                                description=str(c.get("description") or ""), catalog=dict(extra),
+                                source=_chapter_source(p, cid, c.get("source"))))
     gids = [c.global_id or f"{slug}_{c.id}" for c in chapters]
     if len(set(gids)) != len(gids):
         raise BookError(f"{p}: two chapters share a global id: {', '.join(sorted({g for g in gids if gids.count(g) > 1}))}")
@@ -125,7 +128,18 @@ def load_book(path: str | Path) -> Book:
                 publish=dict(raw.get("publish") or {}),
                 root=p.parent.resolve(),
                 legacy_cache=str((p.parent / str(raw["legacy_cache"])).expanduser().resolve()) if raw.get("legacy_cache") else "",
-                recap_earlier_chapters=bool(raw.get("recap_earlier_chapters", True)))
+                recap_earlier_chapters=bool(raw.get("recap_earlier_chapters", True)), pipeline=dict(raw.get("pipeline") or {}))
+
+
+def _chapter_source(book_yaml: Path, cid: str, raw: Any) -> dict[str, Any]:
+    """A chapter's `source: {pdf: FILE, chapter: N, attribution: ...}` (path B of the pipeline), the pdf made absolute."""
+    if not raw:
+        return {}
+    if not isinstance(raw, dict) or not raw.get("pdf") or not isinstance(raw.get("chapter"), int):
+        raise BookError(f"{book_yaml}: chapter {cid!r}: source must be {{pdf: FILE, chapter: N}}")
+    out = dict(raw)
+    out["pdf"] = str((book_yaml.parent / str(raw["pdf"])).expanduser().resolve())
+    return out
 
 
 def model_dir_name(model: str) -> str:

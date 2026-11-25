@@ -389,6 +389,129 @@ def migrate(library: Path, repo: str, press: str, slug: str, title: str, adapter
                f"{', legacy cache ' + b.legacy_cache if b.legacy_cache else ''}")
 
 
+def _step_target(book, step: str, chapter: str):
+    from .pipeline import BOOK_STEPS, CHAPTER_STEPS, STEPS
+    if step not in STEPS:
+        raise click.UsageError(f"STEP is one of {', '.join(STEPS)}")
+    if step in BOOK_STEPS:
+        if chapter:
+            raise click.UsageError(f"{step} is a book step: give no -c")
+        return [None]
+    if not chapter:
+        raise click.UsageError(f"{step} is a chapter step: give -c CHAPTER (or -c all)")
+    return list(book.chapters) if chapter == "all" else [book.chapter(chapter)]
+
+
+@main.command(name="next")
+@click.argument("target")
+@click.option("--parallel", type=int, default=2, show_default=True, help="at most this many steps running at once")
+@click.option("--foreground", is_flag=True, help="run the ready steps here, one after another, instead of in the background")
+@click.option("--dry-run", is_flag=True, help="only say what would start")
+@click.option("--watch", type=int, default=0, metavar="SECONDS", help="keep dispatching every SECONDS until stopped")
+@click.pass_obj
+@_guard
+def next_(library: Path, target: str, parallel: int, foreground: bool, dry_run: bool, watch: int) -> None:
+    """Start every pipeline step that is ready: the step before it is OK and approved, and its own manifest is missing,
+    stale (its inputs changed), rejected or marked for retry. Each runs in the background and writes
+    <book>/pipeline/[<chapter>/]<step>.out.yaml; see `bookgraph status`."""
+    import time as _time
+    from .pipeline import dispatch, log_path
+    root = _find_book(target, library)
+    while True:
+        book = load_book(root)
+        started = dispatch(book, library, parallel=parallel, foreground=foreground, dry_run=dry_run)
+        for t in started:
+            where = "" if foreground or dry_run else f" (log: {log_path(book, t.step, t.chapter)})"
+            click.echo(f"{'would start' if dry_run else 'ran' if foreground else 'started'} {t.name}{where}")
+        if not watch:
+            if not started:
+                click.echo("nothing ready: see `bookgraph status` (a step waits for the one before it to be OK and approved)")
+            return
+        _time.sleep(watch)
+
+
+@main.command()
+@click.argument("target")
+@click.pass_obj
+@_guard
+def status(library: Path, target: str) -> None:
+    """The pipeline of a book: each chapter's steps (1-ingest .. 4-generate), then 5-build and 6-publish, with what is ready
+    and what waits for review."""
+    from .pipeline import status_rows
+    book = load_book(_find_book(target, library))
+    for r in status_rows(book):
+        t, m = r["task"], r["manifest"]
+        if m:
+            review = (m.get("review") or {}).get("status", "")
+            state = m["status"] + (f", review {review}" if m["status"] != "RUNNING" and review else "")
+            line = (m.get("summary") or m.get("error") or "")[:90]
+        else:
+            state, line = "-", ""
+        flag = "READY  " if r["ready"] else "       "
+        click.echo(f"{flag}{t.chapter.id if t.chapter else 'book':10} {t.step:11} {state:26} {r['why']:28} {line}")
+
+
+def _review(library: Path, target: str, step: str, chapter: str, decision: str, note: str, by: str) -> None:
+    from .pipeline import review
+    book = load_book(_find_book(target, library))
+    for ch in _step_target(book, step, chapter):
+        m = review(book, step, ch, decision, by=by, note=note)
+        click.echo(f"{step}{' ' + ch.id if ch else ''}: {'marked for retry' if decision == 'retry' else m['review']['status']}")
+
+
+@main.command()
+@click.argument("target")
+@click.argument("step")
+@click.option("--chapter", "-c", default="", help="the chapter, or `all` (chapter steps)")
+@click.option("--note", "-m", default="")
+@click.option("--by", default="", help="the reviewer (default: your user name)")
+@click.pass_obj
+@_guard
+def approve(library: Path, target: str, step: str, chapter: str, note: str, by: str) -> None:
+    """Approve a step's last run (it must be OK): the next step may then start."""
+    _review(library, target, step, chapter, "approve", note, by)
+
+
+@main.command()
+@click.argument("target")
+@click.argument("step")
+@click.option("--chapter", "-c", default="", help="the chapter, or `all` (chapter steps)")
+@click.option("--note", "-m", default="", help="why: kept in the manifest")
+@click.option("--by", default="", help="the reviewer (default: your user name)")
+@click.pass_obj
+@_guard
+def reject(library: Path, target: str, step: str, chapter: str, note: str, by: str) -> None:
+    """Reject a step's last run: `bookgraph next` runs it again (2-extract extracts again, 4-generate regenerates)."""
+    _review(library, target, step, chapter, "reject", note, by)
+
+
+@main.command()
+@click.argument("target")
+@click.argument("step")
+@click.option("--chapter", "-c", default="", help="the chapter, or `all` (chapter steps)")
+@click.pass_obj
+@_guard
+def retry(library: Path, target: str, step: str, chapter: str) -> None:
+    """Mark a NOT_OK step to run again as it is (e.g. after a rate limit); a changed input makes it ready by itself."""
+    _review(library, target, step, chapter, "retry", "", "")
+
+
+@main.command(name="pipeline-step", hidden=True)
+@click.argument("book_dir")
+@click.argument("step")
+@click.option("--chapter", "-c", default="")
+@click.pass_obj
+@_guard
+def pipeline_step(library: Path, book_dir: str, step: str, chapter: str) -> None:
+    """(internal) Run one pipeline step and write its manifest: what `bookgraph next` starts in the background."""
+    from .pipeline import run_step
+    book = load_book(book_dir)
+    m = run_step(book, step, book.chapter(chapter) if chapter else None)
+    click.echo(f"{m['status']}: {m.get('summary', '')}")
+    if m["status"] != "OK":
+        sys.exit(1)
+
+
 @main.command(name="list")
 @click.pass_obj
 @_guard
