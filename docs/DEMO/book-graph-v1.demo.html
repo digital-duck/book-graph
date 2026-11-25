@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>book-graph</title>
+<style>
+  :root {
+    --ink: #1c2330; --muted: #5b6678; --paper: #fbfbfa; --line: #dfe3ea;
+    --blue: #4f8df5; --gray: #8a919c; --green: #2e9e6b; --orange: #e8913a; --red: #d8473f;
+    --code-bg: #0f1623; --code-ink: #dbe4f3;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #e9ebef; color: var(--ink);
+    font: calc(min(96vw, 158vh) / 54.7)/1.42 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .deck { position: fixed; inset: 0 0 4.5vh 0; display: grid; place-items: center; }
+  .slide { display: none; width: min(96vw, 158vh); height: min(54vw, 89vh); background: var(--paper);
+    border-radius: 14px; box-shadow: 0 8px 40px rgba(20,30,50,.18); padding: 4.2% 5.5% 3.5%;
+    flex-direction: column; overflow: hidden; position: relative; }
+  .slide.on { display: flex; }
+  h1 { font-size: 2.5em; line-height: 1.1; margin: 0 0 .3em; letter-spacing: -.02em; }
+  h2 { font-size: 1.7em; margin: 0 0 .5em; letter-spacing: -.01em; }
+  h2::after { content: ""; display: block; width: 64px; height: 4px; background: var(--blue); border-radius: 2px; margin-top: .25em; }
+  h3 { font-size: 1.05em; margin: 0 0 .3em; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+  p { margin: 0 0 .6em; }
+  ul { margin: 0; padding-left: 1.1em; }
+  li { margin: .3em 0; }
+  li > ul { font-size: .82em; margin-top: .1em; }
+  li::marker { color: var(--blue); }
+  .sub { color: var(--muted); font-size: 1.15em; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 3%; align-items: start; flex: 1; min-height: 0; }
+  .cols.wide-left { grid-template-columns: 1.25fr 1fr; }
+  .cols.wide-right { grid-template-columns: 1fr 1.25fr; }
+  pre, code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  code { background: #eef0f4; padding: .05em .35em; border-radius: 4px; font-size: .88em; }
+  pre { background: var(--code-bg); color: var(--code-ink); padding: .7em .9em; border-radius: 10px; font-size: .66em; line-height: 1.45;
+    margin: 0 0 .6em; overflow: hidden; white-space: pre; }
+  pre .c { color: #7d8ba3; } pre .k { color: #8cc4ff; } pre .s { color: #a5e3b4; } pre .h { color: #ffcf7a; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: .6em .9em; }
+  .tag { display: inline-block; font-size: .62em; font-weight: 700; padding: .12em .6em; border-radius: 99px; color: #fff; vertical-align: middle; }
+  .t-gen { background: var(--blue); } .t-io { background: var(--gray); } .t-sol { background: var(--green); }
+  .t-ctl { background: var(--orange); } .t-safe { background: var(--red); }
+  table { border-collapse: collapse; width: 100%; font-size: .92em; }
+  th, td { text-align: left; padding: .35em .6em; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: .85em; text-transform: uppercase; letter-spacing: .05em; }
+  .big { font-size: 1.5em; line-height: 1.3; }
+  .center { text-align: center; }
+  .grow { flex: 1; min-height: 0; }
+  .foot { position: absolute; left: 5.5%; right: 5.5%; bottom: 1.8%; display: flex; justify-content: space-between;
+    color: #9aa3b2; font-size: .5em; }
+  .foot a { color: inherit; text-decoration: underline; }
+  .refs a { color: var(--blue); display: block; }
+  .refs li { font-size: .78em; }
+  .quiet { color: var(--muted); }
+  .good { color: var(--green); font-weight: 600; } .bad { color: var(--red); font-weight: 600; }
+  .demo { border-left: 6px solid var(--orange); background: #fff6ea; border-radius: 0 10px 10px 0; padding: .5em .9em; margin-bottom: .7em; font-size: .85em; }
+  .demo b { color: var(--orange); letter-spacing: .06em; font-size: .8em; text-transform: uppercase; }
+  .stack > * { margin-bottom: .45em; }
+  svg { max-width: 100%; height: auto; }
+  svg text { font: 600 13px system-ui, sans-serif; }
+  #bar { position: fixed; left: 0; top: 0; height: 4px; background: var(--blue); width: 0; transition: width .2s; z-index: 5; }
+  #nav { position: fixed; left: 50%; bottom: 8px; transform: translateX(-50%); display: flex; gap: 6px; z-index: 6; }
+  #nav button { font: 600 14px system-ui, sans-serif; min-width: 44px; padding: 6px 12px; border-radius: 8px; border: 1px solid #c9ced8;
+    background: #fff; color: var(--ink); cursor: pointer; }
+  #nav button:hover { background: #eef2fb; border-color: var(--blue); }
+  #nav button:disabled { opacity: .4; cursor: default; background: #fff; border-color: #c9ced8; }
+  #nav #pdf { margin-left: 10px; }
+  #nav #tocbtn { margin-right: 10px; }
+  #hud { position: fixed; right: 14px; bottom: 10px; font-size: 13px; color: #7d8696; z-index: 5; }
+  .toc { columns: 3; column-gap: 3%; list-style: none; margin: 0; padding: 0; font-size: .8em; }
+  .toc li { break-inside: avoid; margin: .22em 0; padding: .12em .3em; border-radius: 6px; cursor: pointer; display: flex; gap: .6em; }
+  .toc li:hover { background: #eef2fb; }
+  .toc .n { color: var(--blue); font-weight: 700; min-width: 1.6em; text-align: right; }
+  .notes { display: none; }
+  #notes-box { display: none; }
+  body.show-notes #notes-box { display: block; position: fixed; left: 0; right: 0; bottom: 0; max-height: 34vh; overflow: auto;
+    background: #141a26; color: #d7deeb; padding: 14px 6vw; font-size: 17px; line-height: 1.5; z-index: 9; }
+  @page { size: 13.333in 7.5in; margin: 0; }
+  @media print {
+    html, body { background: #fff; height: auto; font-size: 24px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .deck { position: static; display: block; }
+    .slide { display: flex !important; width: 13.333in; height: 7.5in; border-radius: 0; box-shadow: none; break-after: page; page-break-after: always; }
+    .slide:last-child { break-after: auto; page-break-after: auto; }
+    pre { font-size: .58em; }       /* the page is smaller than the screen: keep code lines inside their box */
+    #bar, #hud, #nav, .notes, #notes-box { display: none !important; }
+  }
+</style>
+</head>
+<body data-title="book-graph">
+<div id="bar"></div>
+<div id="nav">
+  <button id="tocbtn" title="Outline (T)">TOC</button>
+  <button id="first" title="First slide (Home)">&lt;&lt;</button>
+  <button id="prev" title="Previous slide (←)">&lt;</button>
+  <button id="next" title="Next slide (→ or space)">&gt;</button>
+  <button id="last" title="Last slide (End)">&gt;&gt;</button>
+  <button id="pdf" title="Opens the print dialog: choose Save as PDF, landscape, margins None, and tick Background graphics">PDF</button>
+</div>
+<div id="hud">← → or space · T outline · F fullscreen · N notes · O overview</div>
+<div class="deck" id="deck">
+<section class="slide">
+  <div style="margin:auto 0">
+    <h1>book-graph</h1>
+    <p class="big">Concept books from concept graphs, on GraphLang</p>
+    <p class="sub">press &gt; book &gt; chapter · one engine, one web app, every book</p>
+    <p class="quiet" style="margin-top:3.2em"><a href="mailto:wen.gong.research@gmail.com" style="color:inherit">wen.gong.research@gmail.com</a></p>
+  </div>
+  <div class="foot"><span><a href="https://github.com/digital-duck/book-graph" target="_blank" rel="noopener">https://github.com/digital-duck/book-graph</a></span><span>v1 · early prototype</span></div>
+  <aside class="notes">book-graph turns a concept graph per chapter into a published concept book: one section per concept in teaching order, an interactive navigator, a web site. It replaces a fork-per-book model with one engine and one web app, and runs on GraphLang recipes like app-graph, work-graph and data-graph.</aside>
+</section>
+
+<section class="slide" id="outline">
+  <h2>Outline</h2>
+  <ol class="toc" id="toc"></ol>
+  <aside class="notes">The outline lists every slide title; click a line to jump.</aside>
+</section>
+
+<section class="slide">
+  <h2>A concept book, built from a graph</h2>
+  <div class="cols">
+    <ul>
+      <li>A chapter is a <b>graph of what it teaches</b>: primitives, the concepts built from them, and what they are for.</li>
+      <li>The book writes <b>one section per concept</b>, in an order where every idea comes after what it needs.</li>
+      <li>It ends with a <b>payoff</b>: the capstone, and how everything comes together in it.</li>
+      <li>Readers explore it through an interactive <b>navigator</b>, at their level and in their language.</li>
+    </ul>
+    <svg viewBox="0 0 440 330" role="img" aria-label="a small concept graph">
+      <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#8a919c"/></marker></defs>
+      <g stroke="#8a919c" stroke-width="2" fill="none" marker-end="url(#ar)">
+        <path d="M95,58 L170,120"/><path d="M335,58 L262,120"/><path d="M215,148 L215,182"/>
+        <path d="M215,212 L215,246"/><path d="M335,58 C410,140 330,230 266,256"/><path d="M164,134 C70,190 120,280 166,290"/><path d="M215,276 L215,300"/>
+      </g>
+      <g font-weight="600" font-size="14" text-anchor="middle">
+        <rect x="40" y="30" width="110" height="30" rx="15" fill="#fffde7" stroke="#795548"/><text x="95" y="50">distance</text>
+        <rect x="280" y="30" width="110" height="30" rx="15" fill="#fffde7" stroke="#795548"/><text x="335" y="50">time</text>
+        <rect x="160" y="120" width="110" height="30" rx="6" fill="#e8f5e9" stroke="#2e7d32"/><text x="215" y="140">speed</text>
+        <rect x="160" y="184" width="110" height="30" rx="6" fill="#e8f5e9" stroke="#2e7d32"/><text x="215" y="204">velocity</text>
+        <rect x="150" y="248" width="130" height="30" rx="6" fill="#e8f5e9" stroke="#2e7d32"/><text x="215" y="268">acceleration</text>
+        <rect x="135" y="300" width="160" height="28" rx="6" fill="#fce4ec" stroke="#c62828"/><text x="215" y="319">braking distance</text>
+      </g>
+    </svg>
+  </div>
+  <aside class="notes">The tutorial's chapter: distance and time are primitives (brown), speed, velocity and acceleration concepts (green), braking distance the application (red), the capstone the chapter's book is written toward. The colours are the navigator's.</aside>
+</section>
+
+<section class="slide">
+  <h2>The problem: one forked repo per book</h2>
+  <div class="cols">
+    <ul>
+      <li>Each <code>cb-*</code> book forked the whole app: frontend, FastAPI backend, SPL workflow, scripts.</li>
+      <li>A book is really <b>graph.yaml + settings + generated pages</b>; the rest is copied boilerplate.</li>
+      <li>The copies <b>drift</b>. A fix must be ported by hand to every repo.</li>
+      <li>Publishing is per-repo glue: sync scripts, <code>.env</code>, deploy scripts.</li>
+    </ul>
+    <div class="card stack">
+      <h3>Measured across the repos</h3>
+      <div><b>13</b> cb repos (cb-zinets aside), <b>260</b> chapter graphs</div>
+      <div><b>6</b> different copies of the navigator generator <code>concept_graph.py</code></div>
+      <div>cb-calculus, cb-linalg, cb-chemistry, cb_biology run an <b>older frontend</b> (≈700 lines apart)</div>
+      <div>generation: a 400-line SPL file shelled out from the API</div>
+    </div>
+  </div>
+  <aside class="notes">The plan's diagnosis, confirmed while building: the navigator script exists in six versions, and most cb repos are on an older frontend than the template. A shared engine removes the drift by construction.</aside>
+</section>
+
+<section class="slide">
+  <h2>The idea: a book is data, not a repo</h2>
+  <div class="cols wide-left">
+    <ul>
+      <li><b>press &gt; book &gt; chapter</b>: a library of books, each a <code>book.yaml</code> and a graph per chapter.</li>
+      <li>The engine, the recipes and the web app are installed <b>once</b>; a fix reaches every book by upgrading one package.</li>
+      <li>Two ways in: a graph <b>authored</b> by an expert or a teacher, or one <b>extracted</b> from a textbook.</li>
+      <li>One way out: pages, navigator, site, catalog, all generated, all reproducible.</li>
+    </ul>
+<pre><span class="c">~/book-graph/library/</span>
+  catalog.json
+  acme/physics/book.yaml
+  acme/physics/chapters/ch01/
+    graph.yaml
+    output/core.en/sonnet/html/
+      concept_speed.html  …
+      book_braking_distance.html
+    output/graph.html   <span class="c"># navigator</span>
+    .bg_cache/          <span class="c"># sections</span>
+</pre>
+  </div>
+  <aside class="notes">The layout keeps the old apps' output/level.lang/model/html convention, so existing pages and links carry over unchanged.</aside>
+</section>
+
+<section class="slide">
+  <h2>The concept graph</h2>
+  <div class="cols">
+<pre><span class="h">primitives:</span>
+  distance: {defines: How far something travels.}
+  time:     {defines: How long something takes.}
+<span class="h">concepts:</span>
+  speed:
+    composed_of: [distance, time]
+    defines: Distance travelled per unit of time.
+<span class="h">applications:</span>
+  braking_distance:
+    needs: [acceleration, speed]
+    defines: How far a car travels while braking.
+</pre>
+    <div class="stack">
+      <ul>
+        <li>The <b>ConceptBook</b> format: every existing graph loads unchanged (<b>260 / 260</b>).</li>
+        <li><code>labels: {zh: …}</code> per language, <code>diagram:</code> hints, <code>tier</code>.</li>
+        <li><code>bgr validate</code>: acyclic, declared, reducible to primitives, defined, no duplicate ids, capstone is a node.</li>
+      </ul>
+<pre><span class="c">$ bgr validate acme/physics</span>
+ok   ch01
+</pre>
+    </div>
+  </div>
+  <aside class="notes">Checks were chosen by measuring each candidate on the 260 real graphs: the capstone check found three real broken chapters in cb-world-powers; connectivity and orphan checks were dropped as noise.</aside>
+</section>
+
+<section class="slide">
+  <h2>Teaching order</h2>
+  <div class="cols">
+    <ul>
+      <li>Every node after its prerequisites, and early the nodes that <b>unlock the most</b> others.</li>
+      <li>Computed by <b>zinet</b>, shared with GraphLang, app-graph and work-graph; no private copy.</li>
+      <li>Restricted to what the <b>capstone</b> needs.</li>
+      <li>Identical to the old apps' order on all <b>260</b> graphs.</li>
+    </ul>
+<pre><span class="c">$ bgr order …/ch01/graph.yaml</span>
+distance
+time
+speed
+velocity
+acceleration
+braking_distance
+</pre>
+  </div>
+  <aside class="notes">Deterministic too: the heap breaks ties by node id, so every recipe step, in its own subprocess, computes the same order.</aside>
+</section>
+
+<section class="slide">
+  <h2>Generation is a GraphLang recipe</h2>
+  <div class="cols wide-right">
+    <div class="card stack">
+      <h3>generate_chapter</h3>
+      <div><span class="tag t-sol">SOLVE</span> prepare: validate, plan, style guide</div>
+      <div><span class="tag t-safe">GUARD</span> may it write here (Cedar)</div>
+      <div><span class="tag t-ctl">LOOP</span> per section, in teaching order:</div>
+      <div style="padding-left:1.2em">cache → <span class="tag t-gen">GENERATE</span> write → primitive-budget check → <span class="tag t-gen">GENERATE</span> refine once → cache + page</div>
+      <div><span class="tag t-gen">GENERATE</span> payoff for the capstone</div>
+      <div><span class="tag t-sol">SOLVE</span> book page: contents + payoff</div>
+    </div>
+    <ul>
+      <li>Replaces the 400-line SPL workflow; the <b>prompts are verbatim</b>.</li>
+      <li>Deterministic steps are plain Python, JSON in, JSON out.</li>
+      <li>Every step that writes is <code>risky: true</code>, reachable only through the GUARD.</li>
+      <li>Transient model failures retried in the recipe.</li>
+    </ul>
+  </div>
+<pre><span class="c">$ bgr generate acme/physics</span>
+ok   ch01 core.en sonnet (7 model calls) …/book_braking_distance.html
+</pre>
+  <aside class="notes">Six sections plus the payoff. Levels map to style profiles (intro is Feynman-style, research keeps proof rigor for math, physics and engineering). Every level, language and model combination is a variant.</aside>
+</section>
+
+<section class="slide">
+  <h2>Every section is cached, old ones reused</h2>
+  <div class="cols">
+    <ul>
+      <li>Keyed by <b>what reaches the prompt</b>: language, style, full model, label, definition, and a hash of the prompts.</li>
+      <li>A second run costs <b>0</b> model calls; editing one definition regenerates one section.</li>
+      <li><b>Legacy cache</b>: the SPL apps' spl3 store, read with spl3's own keys.</li>
+      <li><b>Cross-chapter recaps</b>: a concept an earlier chapter introduced is recapped, not re-derived (press's rule, byte for byte).</li>
+    </ul>
+    <div class="card stack">
+      <h3>Measured on cb-meta-health</h3>
+      <div><b>444 / 444</b> spl3 keys recomputed</div>
+      <div>a migrated chapter, 11 concepts repeated from earlier chapters: <b>24 sections, 0 model calls</b></div>
+      <div class="quiet">“never regenerate existing content during migration”: met</div>
+    </div>
+  </div>
+  <aside class="notes">The legacy lookup keeps the plain context, because the SPL apps wrote their sections without the recap note; the note still shapes new sections.</aside>
+</section>
+
+<section class="slide">
+  <h2>Runs that resume</h2>
+  <div class="cols">
+    <ul>
+      <li>Every <code>generate</code> is a <b>run</b> with a ledger: each chapter × level × language × model, its status and calls.</li>
+      <li><code>--resume last</code> runs only what is not done.</li>
+      <li>Inside a chapter the <b>section cache</b> is the resume: a re-run after failing at 3 of 6 calls costs <b>3</b>.</li>
+      <li><code>--budget</code> caps the whole run; it stops after two failures in a row; Ctrl-C saves it.</li>
+    </ul>
+<pre><span class="c">$ bgr generate acme/physics --budget 500</span>
+…
+<span class="c">^C</span>
+interrupted: run …-4867 saved; continue with:
+  bgr generate acme/physics --resume …-4867
+<span class="c">$ bgr runs acme/physics</span>
+20261125-…-4867  done   4/4 done  15 calls
+</pre>
+  </div>
+  <aside class="notes">GraphLang's checkpoints were not enough here: a LOOP is one checkpoint step, so a failure inside the section loop would re-run the whole loop. The cache already skips finished rounds, so the resumable unit is the book run.</aside>
+</section>
+
+<section class="slide">
+  <h2>Two paths into a book</h2>
+  <svg viewBox="0 0 1000 250" role="img" aria-label="pipeline paths" style="flex:1">
+    <defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5b6678"/></marker></defs>
+    <g font-size="17" font-weight="600" text-anchor="middle">
+      <text x="70" y="45" fill="#e8913a">path B</text><text x="70" y="150" fill="#2e9e6b">path A</text>
+      <rect x="130" y="22" width="130" height="40" rx="8" fill="#fff6ea" stroke="#e8913a"/><text x="195" y="48">1-ingest</text>
+      <rect x="300" y="22" width="130" height="40" rx="8" fill="#fff6ea" stroke="#e8913a"/><text x="365" y="48">2-extract</text>
+      <rect x="300" y="128" width="130" height="40" rx="8" fill="#eaf7f0" stroke="#2e9e6b"/><text x="365" y="154">graph.yaml</text>
+      <rect x="470" y="75" width="130" height="40" rx="8" fill="#fff" stroke="#4f8df5"/><text x="535" y="101">3-validate</text>
+      <rect x="640" y="75" width="130" height="40" rx="8" fill="#fff" stroke="#4f8df5"/><text x="705" y="101">4-generate</text>
+      <rect x="810" y="40" width="130" height="40" rx="8" fill="#fff" stroke="#4f8df5"/><text x="875" y="66">5-build</text>
+      <rect x="810" y="120" width="130" height="40" rx="8" fill="#fff" stroke="#4f8df5"/><text x="875" y="146">6-publish</text>
+    </g>
+    <g stroke="#5b6678" stroke-width="2" fill="none" marker-end="url(#a2)">
+      <path d="M260,42 L298,42"/><path d="M430,42 C450,42 450,90 468,92"/><path d="M430,148 C450,148 450,100 468,98"/>
+      <path d="M600,95 L638,95"/><path d="M770,90 C790,80 790,62 808,60"/><path d="M875,80 L875,118"/>
+    </g>
+    <g font-size="14" fill="#5b6678" text-anchor="middle">
+      <text x="195" y="85">a PDF textbook</text><text x="365" y="195">authored by an expert or a teacher</text>
+      <text x="705" y="140">per chapter</text><text x="875" y="190">per book</text>
+    </g>
+  </svg>
+  <ul>
+    <li><b>B</b>: <code>source: {pdf: chemistry-2e.pdf, chapter: 3}</code> in book.yaml. <b>A</b>: the chapter's own graph.yaml.</li>
+  </ul>
+  <aside class="notes">Both paths meet at validation. Build waits for every chapter's generation; publish waits for the build.</aside>
+</section>
+
+<section class="slide">
+  <h2>Path B: ingest and extract</h2>
+  <div class="cols">
+    <ul>
+      <li><b>ingest</b>: concept-book-press's PDF ingester; one chunk per section from the PDF's bookmarks.</li>
+      <li><b>extract</b>: a recipe with press's two model passes (the concepts, then their prerequisites).</li>
+      <li>Then a <b>deterministic cleanup</b>: dependency-less concepts become primitives, unknown dependencies dropped, labels kept, tiers from the edges.</li>
+      <li>Validated; <b>one repair call</b> if it fails; still invalid → <code>graph.draft.yaml</code>.</li>
+    </ul>
+    <div class="card stack">
+      <h3>Checked against press's own output</h3>
+      <div><b>55</b> chapters from its two PDFs: same chunks, whitespace aside</div>
+      <div><b>190 / 190</b> of its extracted graphs pass the cleanup and validation</div>
+      <div><b>2 bugs</b> fixed in press's YAML repair: a bare colon got through, and valid YAML got broken (<b>31</b> of 190)</div>
+    </div>
+  </div>
+  <aside class="notes">press's prompts said "a physics textbook" for every book; the subject is now a parameter. A live-model extraction has not been run yet: the next thing to try, on one chapter.</aside>
+</section>
+
+<section class="slide">
+  <h2>The pipeline: a manifest per step</h2>
+  <div class="cols wide-right">
+    <ul>
+      <li>Every step writes <code>STEP.out.yaml</code>: proof it ran, <b>OK</b> or <b>NOT_OK</b>.</li>
+      <li>It fingerprints its <b>inputs</b>: an edited graph makes validation stale, and blocks what follows.</li>
+      <li><code>bgr next</code> starts every ready step in the background, then exits. Cron, or <code>--watch</code>.</li>
+      <li>No step starts another; there is <b>no run command</b>.</li>
+    </ul>
+<pre><span class="c"># pipeline/ch01/3-validate.out.yaml</span>
+<span class="k">step:</span> 3-validate
+<span class="k">chapter:</span> ch01
+<span class="k">status:</span> OK
+<span class="k">inputs:</span>
+  graph: d4274f831666db91
+  capstone: braking_distance
+<span class="k">summary:</span> 6 nodes, valid
+<span class="k">review:</span>
+  status: approved
+  by: editor
+  note: graph checked
+</pre>
+  </div>
+  <aside class="notes">Ready means: the step before it is OK, approved and still current; and its own manifest is missing, stale, rejected or marked for retry. A NOT_OK step reruns once its input is fixed or it is retried; a failed generation resumes its run.</aside>
+</section>
+
+<section class="slide">
+  <h2>Human review at every step</h2>
+<pre><span class="c">$ bgr status acme/physics</span>
+       ch01  3-validate  OK, review approved   done              6 nodes, valid
+       ch01  4-generate  OK, review approved   done              run …: done (1 done)
+       book  5-build     OK, review pending    awaiting review   built …/dist
+       book  6-publish   -                     5-build not approved (or stale)
+<span class="c">$ bgr approve acme/physics 5-build -m "site previewed"</span>
+5-build: approved
+<span class="c">$ bgr next acme/physics</span>
+started 6-publish (log: …/pipeline/logs/6-publish.log)
+</pre>
+  <ul>
+    <li><code>approve</code> lets the next step start; <code>reject -m NOTE</code> runs it again; <code>retry</code> reruns a NOT_OK one.</li>
+    <li>Approving <b>5-build</b> is publish's confirmation: async mode has no terminal to ask in.</li>
+    <li><code>pipeline: {auto_approve: [...]}</code> lets chosen steps through.</li>
+  </ul>
+  <aside class="notes">Verified on a migrated cb-meta-health: nine validations ran as background processes, two at a time, in seven seconds; approve -c all released generation for every chapter.</aside>
+</section>
+
+<section class="slide">
+  <h2>One web app for every book</h2>
+  <div class="cols">
+    <ul>
+      <li>concept-book-base's frontend, shipped inside the package.</li>
+      <li>Per-book values come from <code>site:</code>: title, tagline, tags, logo, base path, models.</li>
+      <li><code>bgr build</code>: export the book, write the config, run Vite; about <b>2 s</b> once the packages are cached.</li>
+      <li>The navigator is concept-book-base's page, ported <b>byte for byte</b> (260 / 260).</li>
+    </ul>
+    <div class="card stack">
+      <h3>Checked in Chromium</h3>
+      <div>cb-meta-health: <b>the same rendering</b> as its own build (home, 9 cards, navigator, contents, content panel)</div>
+      <div>cb-calculus, cb-world-powers, cb_biology on the current app: <b>no console errors</b></div>
+      <div class="quiet">the only difference: the model list shows the book's models</div>
+    </div>
+  </div>
+  <aside class="notes">Most cb repos run an older frontend, so a byte-identical rebuild of their sites would need their old code back. The gate used instead: the canonical app, built from the library, serves each book's content correctly.</aside>
+</section>
+
+<section class="slide">
+  <h2>serve: the site with its local API</h2>
+  <div class="cols">
+    <ul>
+      <li>Generate, Export PDF and Settings work: the old FastAPI's API, kept, on the standard library.</li>
+      <li>Content is read <b>live from the library</b>: a page generated from the browser appears at once.</li>
+      <li>Generation runs the recipe in-process, streamed to the browser as events.</li>
+    </ul>
+    <div class="card stack">
+      <h3>Safety, kept and tightened</h3>
+      <div><span class="good">✔</span> 127.0.0.1 only</div>
+      <div><span class="good">✔</span> API keys in memory; never echoed; never reach a recipe step</div>
+      <div><span class="good">✔</span> <b>new</b>: <code>Host</code> must be this server (DNS rebinding)</div>
+      <div><span class="good">✔</span> <b>new</b>: <code>/api</code> same-origin only: an <code>&lt;img&gt;</code> on another site could start a paid generation</div>
+    </div>
+  </div>
+  <aside class="notes">CORS stops another site from reading a response, not from sending the request; a GET that spends model calls needed an origin check. Verified in Chromium: generate from the content panel, then export a PDF.</aside>
+</section>
+
+<section class="slide">
+  <h2>publish: a policy-checked deploy</h2>
+  <div class="cols wide-left">
+    <ul>
+      <li>The built site becomes one fresh commit on <code>gh-pages</code>, as <code>gh-pages --no-history</code> did.</li>
+      <li>A Cedar policy permits the push only when <b>four facts</b> hold.</li>
+      <li>git sees only <code>HOME</code> and <code>SSH_AUTH_SOCK</code>; it never waits for a password.</li>
+    </ul>
+    <div class="card stack">
+      <h3>publish.cedar</h3>
+      <div><span class="tag t-safe">site_ok</span> a built site</div>
+      <div><span class="tag t-safe">remote_ok</span> GitHub or local, reachable</div>
+      <div><span class="tag t-safe">branch_ok</span> not the default, nor main/master</div>
+      <div><span class="tag t-safe">base_ok</span> built for where it is served</div>
+    </div>
+  </div>
+<pre><span class="c">$ bgr publish digital-duck/meta-health --dry-run</span>
+dry run: would push 917 file(s) … to git@github.com:digital-duck/cb-meta-health.git gh-pages
+</pre>
+  <aside class="notes">The base path is read from the built page itself, so a folder built for another path cannot be published by mistake. Refused against the real remote for branch main and for a wrong base; nothing was pushed during development.</aside>
+</section>
+
+<section class="slide">
+  <h2>Migrate the existing books</h2>
+  <div class="cols">
+    <ul>
+      <li><code>bgr migrate REPO</code>: a cb repo into the library; old ids kept, so URLs do not change.</li>
+      <li><code>bgr export</code>: a book back out, as an app's <code>public/domains/</code>.</li>
+      <li>Round trip on all <b>13</b> repos: <b>file for file identical</b>.</li>
+    </ul>
+    <table>
+      <tr><th>catalog fix</th><th>count</th></tr>
+      <tr><td>names with the <code>_zh</code> bug</td><td>1,951</td></tr>
+      <tr><td>pages never listed</td><td>635</td></tr>
+      <tr><td>records missing keys</td><td>174</td></tr>
+      <tr><td>missing or stale counts</td><td>45</td></tr>
+      <tr><td>entries to missing files</td><td>5</td></tr>
+    </table>
+  </div>
+  <aside class="notes">Every catalog difference was a correction of the old, stale catalog; none was a loss. The catalog is recomputed from the files on disk.</aside>
+</section>
+
+<section class="slide">
+  <h2>Safety by design</h2>
+  <div class="cols">
+    <div class="card stack">
+      <h3>Recipes</h3>
+      <div>every step that writes is <code>risky: true</code>, behind a Cedar GUARD</div>
+      <div>writes only under home, /tmp or declared roots</div>
+      <div>steps run with <code>PATH</code> only: no keys, no home</div>
+    </div>
+    <div class="card stack">
+      <h3>Content</h3>
+      <div>model output is <b>untrusted</b>: escaped; one exact figure shape allowed</div>
+      <div>every path segment checked</div>
+      <div>nothing overwritten without <code>--force</code>; a damaged catalog never overwritten</div>
+    </div>
+  </div>
+  <aside class="notes">These rules hold across generate, extract, build, serve and publish, and are written down in the repository's CLAUDE.md so later changes keep them.</aside>
+</section>
+
+<section class="slide">
+  <h2>How it was verified</h2>
+  <ul>
+    <li><b>107</b> offline tests with a scripted model, plus <b>2</b> browser tests (build, then Generate and Export PDF in Chromium).</li>
+    <li>On the real repos, not just fixtures:
+      <ul>
+        <li>260 / 260 graphs load, validate and keep the old teaching order</li>
+        <li>13 / 13 cb repos round-trip file for file; 444 / 444 legacy cache keys</li>
+        <li>55 / 55 ingested chapters match press; 190 / 190 extracted graphs pass</li>
+        <li>cb-meta-health renders the same as its own build</li>
+      </ul>
+    </li>
+    <li>Not yet: a <b>live-model</b> extraction and a first real publish. These come next.</li>
+  </ul>
+  <aside class="notes">Each figure on these slides was measured while building; the review document in docs/DEV records how, step by step.</aside>
+</section>
+
+<section class="slide">
+  <h2>Demo</h2>
+<pre><span class="c"># path A: an authored graph</span>
+bgr new acme physics --title "Everyday Physics"
+<span class="c"># write chapters/ch01/graph.yaml, set capstone and models in book.yaml</span>
+bgr validate acme/physics &amp;&amp; bgr order …/ch01/graph.yaml
+bgr generate acme/physics
+bgr serve acme/physics                         <span class="c"># http://127.0.0.1:8200/physics/</span>
+
+<span class="c"># the pipeline, a review at every step</span>
+bgr status acme/physics
+bgr next acme/physics
+bgr approve acme/physics 3-validate -c ch01 -m "graph checked"
+bgr next acme/physics --watch 60
+
+<span class="c"># path B, and the existing books</span>
+bgr ingest acme/chem --pdf chemistry-2e.pdf --chapter 3
+bgr extract acme/chem -c ch03
+bgr migrate ~/projects/digital-duck/cb-meta-health
+</pre>
+  <aside class="notes">The same sequence as docs/GUIDE/Tutorial.md, which shows the real output of each command.</aside>
+</section>
+
+<section class="slide">
+  <h2>Status and what's next</h2>
+  <div class="cols">
+    <div class="card stack">
+      <h3>Built</h3>
+      <div><span class="good">✔</span> book.yaml, validate, order, generate, runs</div>
+      <div><span class="good">✔</span> ingest, extract, cross-chapter recaps</div>
+      <div><span class="good">✔</span> build, serve, publish, navigator</div>
+      <div><span class="good">✔</span> migrate, export, legacy cache</div>
+      <div><span class="good">✔</span> the pipeline: manifests, next, review</div>
+    </div>
+    <div class="card stack">
+      <h3>Next</h3>
+      <div>a live-model trial: extract one chapter, migrate and publish one book</div>
+      <div>a reviewer's note reaching the model on reject</div>
+      <div>review in the browser, from <code>serve</code></div>
+      <div>prerequisite context in each section's prompt</div>
+    </div>
+  </div>
+  <aside class="notes">conceptbook-app and cb-zinets stay separate, as decided in the plan; conceptbook-app reads the same catalog and domains contract that export writes.</aside>
+</section>
+
+<section class="slide">
+  <h2>References</h2>
+  <ul class="refs">
+    <li><a href="https://github.com/digital-duck/book-graph" target="_blank" rel="noopener">github.com/digital-duck/book-graph</a> · docs/GUIDE: Setup, Tutorial, User Guide</li>
+    <li><a href="https://github.com/digital-duck/graflang" target="_blank" rel="noopener">github.com/digital-duck/graflang</a>: the GraphLang runtime</li>
+    <li><a href="https://github.com/digital-duck/zinet" target="_blank" rel="noopener">github.com/digital-duck/zinet</a>: graph algorithms</li>
+    <li><a href="https://github.com/digital-duck/app-graph" target="_blank" rel="noopener">app-graph</a>, <a href="https://github.com/digital-duck/work-graph" target="_blank" rel="noopener">work-graph</a>: the other GraphLang apps</li>
+    <li><a href="https://openstax.org" target="_blank" rel="noopener">openstax.org</a>: open textbooks (CC BY 4.0), the source of the extracted books</li>
+  </ul>
+  <p class="big center" style="margin-top:1.2em">Thank you</p>
+  <aside class="notes">Questions welcome.</aside>
+</section>
+
+</div>
+<script>
+(function () {
+  // the outline slide is built from the other slides' titles, so it cannot drift when a slide is added or renamed
+  (function () {
+    const all = [...document.querySelectorAll('.slide')], toc = document.getElementById('toc');
+    if (!toc) return;
+    all.forEach((sl, k) => {
+      const h = sl.querySelector('h2');
+      if (!h || sl === toc.closest('.slide')) return;
+      const li = document.createElement('li');
+      li.innerHTML = '<span class="n">' + (k + 1) + '</span><span>' + h.innerHTML + '</span>';
+      li.onclick = e => { e.stopPropagation(); window.__show && window.__show(k); };
+      toc.appendChild(li);
+    });
+  })();
+  const slides = [...document.querySelectorAll('.slide')];
+  const bar = document.getElementById('bar');
+  let i = Math.min(Math.max(parseInt(location.hash.slice(1), 10) - 1 || 0, 0), slides.length - 1);
+  let overview = false;
+
+  function notesBox() {
+    let box = document.getElementById('notes-box');
+    if (!box) { box = document.createElement('div'); box.id = 'notes-box'; document.body.appendChild(box); }
+    const aside = slides[i].querySelector('.notes');
+    box.innerHTML = aside ? aside.innerHTML : '';
+  }
+  function show(n) {
+    i = Math.min(Math.max(n, 0), slides.length - 1);
+    slides.forEach((s, k) => s.classList.toggle('on', k === i));
+    ['first', 'prev'].forEach(id => document.getElementById(id).disabled = i === 0);
+    ['next', 'last'].forEach(id => document.getElementById(id).disabled = i === slides.length - 1);
+    bar.style.width = ((i + 1) / slides.length * 100) + '%';
+    history.replaceState(null, '', '#' + (i + 1));
+    notesBox();
+    // page number in the corner of every slide but the first
+    slides.forEach((s, k) => {
+      let f = s.querySelector('.foot');
+      if (!f && k > 0) { f = document.createElement('div'); f.className = 'foot'; f.innerHTML = '<span></span><span></span>'; f.firstElementChild.textContent = document.body.dataset.title; s.appendChild(f); }
+      if (f && k > 0) f.lastElementChild.textContent = (k + 1) + ' / ' + slides.length;
+    });
+  }
+  window.__show = show;
+  function toggleOverview() {
+    overview = !overview;
+    const deck = document.getElementById('deck');
+    if (overview) {
+      deck.style.cssText = 'position:static;display:grid;grid-template-columns:repeat(3,1fr);gap:14px;padding:14px;place-items:start';
+      slides.forEach((s, k) => { s.classList.add('on'); s.style.cssText = 'width:100%;height:auto;aspect-ratio:16/9;font-size:9px;cursor:pointer'; s.onclick = () => { toggleOverview(); show(k); }; });
+      document.documentElement.style.overflow = 'auto'; document.body.style.overflow = 'auto';
+    } else {
+      deck.style.cssText = '';
+      slides.forEach(s => { s.style.cssText = ''; s.onclick = null; });
+      document.documentElement.style.overflow = ''; document.body.style.overflow = '';
+      show(i);
+    }
+  }
+  const go = (id, f) => document.getElementById(id).addEventListener('click', e => { e.stopPropagation(); if (!overview) f(); });
+  const outline = Math.max(0, slides.findIndex(s => s.id === 'outline'));
+  go('tocbtn', () => show(outline)); go('first', () => show(0)); go('prev', () => show(i - 1)); go('next', () => show(i + 1)); go('last', () => show(slides.length - 1));
+  document.getElementById('pdf').addEventListener('click', () => { if (overview) toggleOverview(); window.print(); });
+  document.addEventListener('keydown', e => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (['ArrowRight', 'PageDown', ' ', 'Enter'].includes(e.key)) { e.preventDefault(); if (!overview) show(i + 1); }
+    else if (['ArrowLeft', 'PageUp', 'Backspace'].includes(e.key)) { e.preventDefault(); if (!overview) show(i - 1); }
+    else if (e.key === 't' || e.key === 'T') { if (!overview) show(outline); }
+    else if (e.key === 'Home') show(0);
+    else if (e.key === 'End') show(slides.length - 1);
+    else if (e.key === 'f' || e.key === 'F') { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen(); }
+    else if (e.key === 'n' || e.key === 'N') document.body.classList.toggle('show-notes');
+    else if (e.key === 'o' || e.key === 'O' || e.key === 'Escape' && overview) toggleOverview();
+  });
+  document.addEventListener('click', e => {
+    if (overview || e.target.closest('a, button, pre')) return;
+    show(e.clientX > innerWidth / 2 ? i + 1 : i - 1);
+  });
+  show(i);
+})();
+</script>
+</body>
+</html>

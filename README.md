@@ -91,4 +91,4 @@ runs again once its input is fixed or `bgr retry` marks it.
 
 Packaging, validation, generation, the catalog, `migrate` and `export` are done and tested with a scripted model (no LLM
 calls in tests). `migrate` then `export` reproduces each `cb-*` repo's `public/domains/` file for file. From a PDF:
-`bgr ingest BOOK --pdf FILE --chapter N`, then `bgr extract BOOK -c chNN`, `bgr generate`, `bgr build`, `bgr publish`. See `docs/` and `concept-book/docs/DEV/readme-book-graph-plan.md`.
+`bgr ingest BOOK --pdf FILE --chapter N`, then `bgr extract BOOK -c chNN`, `bgr generate`, `bgr build`, `bgr publish`. Documentation: [Setup](docs/GUIDE/Setup.md), [Tutorial](docs/GUIDE/Tutorial.md), [User Guide](docs/GUIDE/User-Guide.md); the demo deck, [docs/DEMO/book-graph-v1.demo.html](docs/DEMO/book-graph-v1.demo.html) (open it in a browser; arrow keys, T outline, N notes, PDF); the plan and the review in `docs/DEV/`.

@@ -274,7 +274,8 @@ def _generate(book: Book, ch: Chapter, prev: Optional[dict], llm: Any) -> tuple[
     run = res.run
     details = {"run_id": res.run_id, "variants": run.counts() if run else {}, "llm_calls": run.spent if run else 0,
                "pages": [c.book for c in res.chapters if c.ok], "resumed": bool(resume)}
-    summary = f"run {res.run_id}: {res.run_status} ({details['variants']}; {details['llm_calls']} model calls)"
+    counts = ", ".join(f"{n} {s}" for s, n in sorted(details["variants"].items()))
+    summary = f"run {res.run_id}: {res.run_status} ({counts}; {details['llm_calls']} model calls)"
     if res.run_status == "done" and not res.catalog_error:
         return OK, summary, details
     return NOT_OK, summary + (f": {res.run_reason}" if res.run_reason else "") + (f"; {res.catalog_error}" if res.catalog_error else ""), details
