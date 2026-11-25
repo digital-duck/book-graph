@@ -173,6 +173,34 @@ def _variants(domains: Path, ids: list[str]) -> tuple[list[str], list[str], list
     return [lv for lv in LEVELS if lv in levels], sorted(langs, key=lambda x: (x != "en", langs.index(x))), models
 
 
+def _site_strings(repo: Path) -> dict[str, Any]:
+    """The per-book strings of a repo's frontend, as book.yaml `site:` keys: index.html's title and description, and
+    locales/ui.yaml's app title, tagline and tag names (the only things a current-version repo customizes there)."""
+    import re
+    out: dict[str, Any] = {}
+    page = repo / "index.html"
+    if page.is_file():
+        text = page.read_text(encoding="utf-8")
+        if m := re.search(r'<meta name="description" content="([^"]*)"', text):
+            out["description"] = __import__("html").unescape(m.group(1))
+        if m := re.search(r"<title>(.*?)</title>", text, re.S):
+            out["title"] = {"en": __import__("html").unescape(m.group(1).strip())}
+    ui_file = repo / "locales" / "ui.yaml"
+    if ui_file.is_file():
+        try:
+            ui = yaml.safe_load(ui_file.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError:
+            ui = {}
+        app = ui.get("app") or {}
+        if isinstance(app.get("title"), dict):
+            out["title"] = {str(k): str(v) for k, v in app["title"].items()}
+        if isinstance(app.get("tagline"), dict):
+            out["tagline"] = {str(k): str(v) for k, v in app["tagline"].items()}
+        if isinstance(ui.get("tag"), dict) and ui["tag"]:
+            out["tags"] = ui["tag"]
+    return out
+
+
 def migrate_repo(repo: str | Path, library: Path, *, press: str = "digital-duck", book: str = "", title: str = "",
                  adapter: str = "claude_cli") -> Book:
     """Import a concept-book app repo (`cb-calculus`, ...) into `<library>/<press>/<book>/`. Refuses to overwrite a book.
@@ -229,6 +257,7 @@ def migrate_repo(repo: str | Path, library: Path, *, press: str = "digital-duck"
     spec: dict[str, Any] = {"press": press, "book": slug, "title": title or slug.replace("-", " ").replace("_", " ").title(),
                             "levels": levels or ["core"], "languages": langs or ["en"],
                             "models": [f"{adapter}:{m}" for m in models], "tags": tags, "site": {"base": f"/{repo.name}/"}}
+    spec["site"].update(_site_strings(repo))
     spl = repo / "spl" / ".spl"
     if (spl / "content_meta.db").is_file():
         spec["legacy_cache"] = str(spl)

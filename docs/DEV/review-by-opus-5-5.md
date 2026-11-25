@@ -646,3 +646,60 @@ contract matters, so I ported **concept-book-base's** generator.
   language. `bgr navigator --force` upgrades them to the base version. Their notes key stays `graph`, but I have not compared
   the two versions' pages visually. Check one book in the app before running it on all of them.
 - **Remaining plan steps:** the web build (Phase 2, `bgr build`), `publish`, resumable book runs, and the §9.2 items 6–7.
+
+---
+
+## 12. Build plan, step 5: the web build (Opus 5.5, 2026-11-25)
+
+### 12.1 What the cb repos really customize
+
+I diffed every cb repo's frontend against concept-book-base:
+
+- **Most repos are not customized; they are older.** cb-calculus, cb-linalg, cb-chemistry and cb_biology run an older
+  frontend: no `locales/`, no `html.js`, about 700 lines different across `src/`. So the plan's Phase 1 gate (rebuild
+  cb-calculus's `dist/` identically) cannot be met by one shared app. Only a per-book copy of the old code could pass it,
+  which is the fork model the plan retires. I used this gate instead: **the canonical app, built from the library,
+  serves each book's content correctly.**
+- **A current-version repo customizes a short list.** cb-meta-health, which is on the current frontend, changes only:
+  - `index.html`'s title and description;
+  - `locales/ui.yaml`'s app title, tagline and tag names;
+  - the default level, hardcoded as `'intro'`/`'core'` in three components.
+
+  `src/config.js` (the logo), the base path and the model list are the other per-book values.
+
+### 12.2 What was added
+
+- **`src/bookgraph/web/`:** concept-book-base's frontend (25 git-tracked files at `4c88c04`), shipped with the package.
+  The plan sketched `web/` at the repo root, but a wheel install could not then build. It has three extension points:
+  - `config.js` gains `defaultLevel`, `defaultModel` and `models`, and the three hardcoded literals now read them;
+  - `vite.config.js` takes `BOOKGRAPH_BASE`;
+  - the defaults equal concept-book-base's values, so an unconfigured build behaves the same.
+- **`bgr build TARGET [--out] [--stage]`** (`build.py`):
+  - it stages the app, exports the book into its `public/domains/` (dropping the writers' lock file), and writes
+    `config.js`, `ui.yaml` and `index.html` from `book.yaml: site:`;
+  - it then runs `vite build` with the site's base path;
+  - `node_modules` is installed once per `package-lock.json` under `~/book-graph/web/` and linked into each stage, so a
+    build takes about 2 s;
+  - the model list shows only the book's models: on a static site, the others just lead to "Content Not Available".
+- **`migrate`** now also carries a repo's `index.html` title and description, and its `ui.yaml` app title, tagline and
+  tag names, into `site:`.
+
+### 12.3 Verified in Chromium (Playwright, `tests/web/smoke.mjs`)
+
+| Site | Result |
+|---|---|
+| cb-meta-health: our build vs the repo's own `vite build` | **The same rendering**: page title, home page text, all 9 chapter cards, navigator (26 nodes), table of contents, the content panel loading the capstone's page, and no console errors. The only difference is the model dropdown (ours lists `sonnet (Claude)` only). |
+| cb-calculus, cb-world-powers, cb_biology (older content under the current app) | 6, 17 and 47 chapter cards; navigators with 49, 28 and 40 nodes, older navigators included; the capstone's content loads; no console errors. |
+| A new library book | `BOOKGRAPH_WEB_TESTS=1 pytest -k browser` generates a chapter with the scripted model, builds it, and checks the title, the chapter card, the 5-node navigator and the generated content. It passes. |
+
+`pytest`: 59 passed, plus that one opt-in test. The wheel contains all 25 web files.
+
+### 12.4 Notes and open items
+
+- **Titles of older repos.** cb-calculus, cb_biology and most older repos never changed the template's "ConceptBook"
+  title, so a migrated `book.yaml` says `site.title: ConceptBook`. Set a real title per book.
+- **No `serve` yet.** The Generate, PDF and Settings controls call `/api/*`, which only the local API provides, so they
+  do nothing on a static site, as on today's GitHub Pages sites.
+- **conceptbook-app** is a separate, larger frontend (multi-tenant). The plan and WEN leave it alone; it reads the same
+  `catalog.json`/`public/domains` contract that `export` writes.
+- **Still to do:** `publish` (GitHub Pages), resumable book runs, ingestion, and the §9.2 items 6–7.

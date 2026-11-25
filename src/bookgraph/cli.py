@@ -193,6 +193,21 @@ def navigator(library: Path, target: str, chapters, force: bool) -> None:
 
 
 @main.command()
+@click.argument("target")
+@click.option("--out", "-o", default="", help="the site folder (default: <book>/dist)")
+@click.option("--stage", default="", help="where the app is assembled (default: ~/book-graph/build/<press>/<book>)")
+@click.pass_obj
+@_guard
+def build(library: Path, target: str, out: str, stage: str) -> None:
+    """Build a book (book.yaml, folder or press/book) as a static site: the one web app with the book's chapters, pages,
+    navigators and catalog, and its `site:` title, base path and strings. Needs Node.js (npm)."""
+    from .build import build_site, site_base
+    book = load_book(_find_book(target, library))
+    dest = build_site(book, out or book.root / "dist", stage=stage or None, log=lambda m: click.echo(m, err=True))
+    click.echo(f"built {dest} (served at {site_base(book)}); preview: npx vite preview --outDir {dest} --base {site_base(book)}")
+
+
+@main.command()
 @click.argument("repo", type=click.Path(exists=True, file_okay=False))
 @click.option("--press", default="digital-duck", show_default=True)
 @click.option("--book", "slug", default="", help="the book slug (default: the repo name without `cb-`)")
