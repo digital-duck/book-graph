@@ -12,6 +12,8 @@
     legacy_cache: ../cb-linalg/spl/.spl          # optional: the SPL app's spl3 cache, read (never written) so its sections are reused
     chapters:
       - {id: ch01, title: Systems of equations, graph: chapters/ch01/graph.yaml, capstone: gaussian_elimination}
+        # optional: global_id (default <book>_<id>, e.g. linalg_ch01: the id the web apps and URLs use), description,
+        # catalog: {...} (extra catalog.json fields kept as they are: name, i18n, default_level, source, publisher, pdfs, ...)
 """
 from __future__ import annotations
 
@@ -34,6 +36,9 @@ class Chapter:
     title: str
     graph: str                      # path relative to the book folder
     capstone: str = ""              # the node the chapter's book is written toward; "" = the last application
+    global_id: str = ""             # the id outside the library (catalog.json, URLs, public/domains/<id>/); "" = <book>_<id>
+    description: str = ""
+    catalog: dict[str, Any] = field(default_factory=dict)   # extra catalog.json fields, exported unchanged (bookgraph.export)
 
 
 @dataclass
@@ -62,6 +67,11 @@ class Book:
 
     def chapter_root(self, chapter: Chapter) -> Path:
         return self.root / "chapters" / chapter.id
+
+    def global_id(self, chapter: Chapter) -> str:
+        """The chapter's id outside the library: `global_id:` when given, else `<book>_<chapter>` (`calculus` + `ch01` gives
+        `calculus_ch01`, the id the concept-book apps already use)."""
+        return chapter.global_id or f"{self.book}_{chapter.id}"
 
 
 def load_book(path: str | Path) -> Book:
@@ -92,8 +102,16 @@ def load_book(path: str | Path) -> Book:
         if cid in seen:
             raise BookError(f"{p}: chapter {cid!r} is listed twice")
         seen.add(cid)
+        extra = c.get("catalog") or {}
+        if not isinstance(extra, dict):
+            raise BookError(f"{p}: chapter {cid!r}: 'catalog' must be a mapping")
         chapters.append(Chapter(id=cid, title=str(c.get("title") or cid), graph=str(c.get("graph") or f"chapters/{cid}/graph.yaml"),
-                                capstone=str(c.get("capstone") or "")))
+                                capstone=str(c.get("capstone") or ""),
+                                global_id=safe_segment(str(c["global_id"]), "global_id") if c.get("global_id") else "",
+                                description=str(c.get("description") or ""), catalog=dict(extra)))
+    gids = [c.global_id or f"{slug}_{c.id}" for c in chapters]
+    if len(set(gids)) != len(gids):
+        raise BookError(f"{p}: two chapters share a global id: {', '.join(sorted({g for g in gids if gids.count(g) > 1}))}")
     levels = [str(x) for x in raw.get("levels") or ["core"]]
     for lv in levels:
         if lv not in LEVELS:

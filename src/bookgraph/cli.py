@@ -158,6 +158,40 @@ def catalog(library: Path, target: str | None) -> None:
     click.echo(f"{library / 'catalog.json'}: {len(cat['presses'])} press(es), {books} book(s)")
 
 
+@main.command()
+@click.argument("target")
+@click.argument("domains", type=click.Path(file_okay=False))
+@click.pass_obj
+@_guard
+def export(library: Path, target: str, domains: str) -> None:
+    """Write a book (book.yaml, folder or press/book) into DOMAINS, a web app's public/domains: each chapter's graph, pages and
+    navigator under its global id, and its entry in DOMAINS/catalog.json (other entries are kept)."""
+    from .export import export_book
+    entries = export_book(load_book(_find_book(target, library)), Path(domains).expanduser())
+    for e in entries:
+        click.echo(f"{e['id']}: {len(e['generated_concepts'])} concept page(s), {len(e['books'])} book page(s)"
+                   f"{'' if e['has_navigator'] else ', no navigator'}")
+    click.echo(f"{Path(domains) / 'catalog.json'}: {len(entries)} chapter(s) written")
+
+
+@main.command()
+@click.argument("repo", type=click.Path(exists=True, file_okay=False))
+@click.option("--press", default="digital-duck", show_default=True)
+@click.option("--book", "slug", default="", help="the book slug (default: the repo name without `cb-`)")
+@click.option("--title", default="", help="the book title (default: the slug, title-cased)")
+@click.option("--adapter", default="claude_cli", show_default=True, help="the LLM adapter the repo's model folders were made with")
+@click.pass_obj
+@_guard
+def migrate(library: Path, repo: str, press: str, slug: str, title: str, adapter: str) -> None:
+    """Import a concept-book app repo (cb-calculus, ...) into the library: book.yaml, chapter graphs, generated pages and
+    navigators, and its spl3 cache as `legacy_cache:`. The repo is only read."""
+    from .export import migrate_repo
+    b = migrate_repo(repo, library, press=press, book=slug, title=title, adapter=adapter)
+    click.echo(f"created {b.root / 'book.yaml'}: {len(b.chapters)} chapter(s), levels {', '.join(b.levels)}, "
+               f"languages {', '.join(b.languages)}, models {', '.join(b.models) or '-'}"
+               f"{', legacy cache ' + b.legacy_cache if b.legacy_cache else ''}")
+
+
 @main.command(name="list")
 @click.pass_obj
 @_guard

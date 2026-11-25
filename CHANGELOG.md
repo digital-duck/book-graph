@@ -14,4 +14,5 @@
 - The primitive check skips all of a node's ancestors (taught earlier); an unclosed `<figure>` no longer swallows the section; local paths like `books.v2/demo` work again.
 - `book.yaml: legacy_cache:` reuses an SPL app's spl3 cache (read-only, `bookgraph.legacy`), so migrated books do not pay again for existing sections.
 - Pages keep the `spl-credit` footer class (conceptbook-app strips it before reading text); `graflang` pinned to `>=0.3.0,<0.4`.
+- `bgr migrate REPO` imports a `cb-*` repo (chapters keep their old ids as `global_id`; pages, navigators and book-level files are kept); `bgr export TARGET DOMAINS` writes a book into an app's `public/domains/` with the apps' flat `catalog.json`, its counts and page lists recomputed from disk.
 - A damaged `catalog.json` is refused, not overwritten; unique temp files in the cache; one-pass page templating; `press/book` beats a same-named local folder (B13).

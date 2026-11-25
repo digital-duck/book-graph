@@ -530,3 +530,65 @@ Still open from §9.2:
 
 The older `{domain, language, llm, lvl}` and ctx-less entries are deliberately not looked up: their text may belong to
 an earlier definition of the node.
+
+---
+
+## 10. Build plan, step 3: `migrate` and `export` (Opus 5.5, 2026-11-25)
+
+This delivers the content half of the plan's Phase 1 (book.yaml + "`build` reproduces an existing book from its existing
+`public/domains/`") and `migrate` from Phase 5. The web build itself (Phase 2, one `web/`) is not part of it.
+
+### 10.1 What was added
+
+- **A global chapter id.** It is `Chapter.global_id`, defaulting to `<book>_<chapter>`. That reproduces the existing ids
+  (`calculus` + `ch01` = `calculus_ch01`), so URLs do not change. An explicit `global_id:` is allowed, and two chapters
+  sharing one is an error.
+- **`bgr export TARGET DOMAINS`** (`export.py`, `export_book`). It writes each chapter's graph, pages and navigator, plus
+  the book-level files (`<book>/domains/`: the super-graph, `groups.json`, …), into an app's `public/domains/`. It then
+  merges the chapters into the apps' **flat** `catalog.json`:
+  - other entries are kept, and a chapter already listed is replaced where it stands;
+  - the write takes `catalog.json.lock` with the same flock the apps' `catalog_lock.py` uses, and is written the same way
+    (`indent=2`, trailing newline);
+  - an entry is the chapter's `catalog:` fields from book.yaml, kept as they are (`name`, `i18n`, `source`, `publisher`,
+    `pdfs`, `default_level`, …), plus the computed fields: `id`, `capstone`, the counts (computed as press's
+    `sync_from_press` does), `has_navigator`, `has_book`, `books` and `generated_concepts`, listed from the files on disk.
+- **`bgr migrate REPO`** (`migrate_repo`). It reads a `cb-*` repo's `public/domains/` into `<library>/<press>/<book>/`:
+  - each catalog entry becomes a chapter (`calculus_ch01` → `ch01`; any other id is kept, with `global_id:`);
+  - graphs, `concept_sources.yaml`, generated pages, navigators and book-level files are copied;
+  - levels, languages and model folders are read from `output/`, and models are written as `<adapter>:<folder>` (default
+    `claude_cli`), so page folders and legacy-cache keys stay the same;
+  - `legacy_cache:` points at the repo's `spl/.spl` when it has one;
+  - the repo is only read, and an existing book is never overwritten.
+
+### 10.2 Verified on every cb repo (13; cb-zinets left out)
+
+`migrate` then `export`, compared with the repo's own `public/domains/`:
+
+- **Files:** every file is byte-identical, with none missing and none extra. All 13 repos, from cb-linalg (219 files) to
+  cb-world-powers (4,583).
+- **Catalog:** the same chapters, in the same order. Every field difference falls into one of these kinds, each a
+  correction of a stale or buggy old catalog:
+
+| Count | Difference | Why the new value is right |
+|---:|---|---|
+| 1,951 | `generated_concepts` names with the `_<lang>` suffix (`counting_zh`, "Counting Zh") | the naming bug `catalog_svc.mark_book_generated` describes as fixed; the new entries use the bare node name |
+| 635 | pages on disk that the old catalog never listed (621 concept, 14 book) | the old catalog was only updated by the API or batch run that made them |
+| 174 | old records without `model`/`language` keys | always written now |
+| 38 | entries with no counts | always computed now |
+| 7 | stale counts (the graph was edited after its entry was written) | recomputed from the graph |
+| 5 | catalog entries pointing at files that do not exist (4 book, 1 concept) | dropped: the old app showed "Content Not Available" for them |
+
+`cb-meta-health` and `cb_biology` were migrated with `legacy_cache:` set. §9.5 shows that cb-meta-health's chapter 3
+then generates with 0 model calls.
+
+### 10.3 Still open
+
+- **Navigators for new chapters.** `output/graph.html` is a vis.js page that the app's `GraphViewer.js` scripts through
+  `frame.contentWindow` (relabelling, node selection, saved positions). zinet's cytoscape page does not meet that
+  contract. New chapters therefore export with `has_navigator: false` until `concept_graph.py`'s page is ported, or
+  zinet produces a page that meets the contract.
+- **The super-graph** (`domains/graph.yaml`, from `build_super_graph.py`) is carried through, but not regenerated when a
+  chapter graph changes.
+- **The web build itself** (Phase 2: one `web/`, then `bgr build` = `export` + the Vite app with `site:` config), then
+  `publish`.
+- **Resumable book runs** (9.2-5), the `validate` additions (9.2-7), replay checks and `verify_section` (9.2-6).
