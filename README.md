@@ -58,6 +58,7 @@ chapters:
 | `bgr runs TARGET` | a book's runs: status, variants done, model calls, why one stopped |
 | `bgr catalog [TARGET]` | refresh `catalog.json` for one book or the whole library |
 | `bgr list` | presses, books, chapters |
+| `bgr extract TARGET -c CHAPTER [--chunks FILE] [--llm A:M] [--force]` | a chapter's chunks.yaml -> its graph.yaml: two model passes, normalized, validated, repaired once |
 | `bgr migrate REPO [--press P] [--book SLUG] [--adapter A]` | import a `cb-*` concept-book repo: chapters, pages, navigators, and its spl3 cache as `legacy_cache:` |
 | `bgr navigator TARGET [-c CHAPTER] [--force]` | write each chapter's navigator (`output/graph.html`) where it is missing or its graph changed |
 | `bgr build TARGET [--out DIR]` | the book as a static site: the one web app with the book's content and `site:` strings (needs npm) |

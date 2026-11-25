@@ -305,6 +305,27 @@ def serve(library: Path, target: str, port: int, no_build: bool, out: str) -> No
 
 
 @main.command()
+@click.argument("target")
+@click.option("--chapter", "-c", "chapter", required=True, help="the chapter (book.yaml id)")
+@click.option("--chunks", default="", help="a chunks.yaml (default: <chapter>/chunks.yaml, written by `bookgraph ingest`)")
+@click.option("--llm", "model", default="", help="ADAPTER:MODEL (default: the book's first model)")
+@click.option("--force", is_flag=True, help="replace an existing graph.yaml")
+@click.option("--max-llm-calls", type=int, default=10, show_default=True)
+@click.pass_obj
+@_guard
+def extract(library: Path, target: str, chapter: str, chunks: str, model: str, force: bool, max_llm_calls: int) -> None:
+    """Extract a chapter's concept graph from its chunks (concept-book-press's two passes): normalized, validated, repaired
+    once if needed, written as the chapter's graph.yaml (and concept_sources.yaml)."""
+    from .builder import extract_chapter
+    book = load_book(_find_book(target, library))
+    res = extract_chapter(book, book.chapter(chapter), chunks=Path(chunks) if chunks else None, model=model, force=force,
+                          max_llm_calls=max_llm_calls)
+    if not res.ok:
+        raise click.ClickException(res.error + (f" ({res.llm_calls} model calls)" if res.llm_calls else ""))
+    click.echo(f"{res.summary} ({res.llm_calls} model calls) -> {res.graph}")
+
+
+@main.command()
 @click.argument("repo", type=click.Path(exists=True, file_okay=False))
 @click.option("--press", default="digital-duck", show_default=True)
 @click.option("--book", "slug", default="", help="the book slug (default: the repo name without `cb-`)")

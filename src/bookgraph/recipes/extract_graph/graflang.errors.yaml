@@ -1,0 +1,14 @@
+# Error codes of the extract_graph recipe.
+errors:
+  - code: E_EXTRACT_REFUSED
+    description: the extract policy refused to write into this chapter folder
+    cause: out_dir is not absolute, or not under your home or the temporary folder
+    remedy: use a library under your home folder, or add a root to BOOKGRAPH_WRITE_ROOTS
+  - code: E_EXTRACT_UNREADABLE
+    description: pass 1's answer was not a readable list of concepts
+    cause: the model answered with prose or YAML that cannot be parsed even after the colon/quote repair
+    remedy: run it again (another sample), or with a stronger model (--llm)
+  - code: E_EXTRACT_INVALID
+    description: the graph still failed validation after one repair
+    cause: a cycle, a node without defines, or an id declared twice that the repair call did not fix
+    remedy: edit graph.draft.yaml by hand (bookgraph validate lists the problems), then rename it to graph.yaml

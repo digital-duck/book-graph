@@ -165,3 +165,47 @@ def generate_book(book: Book, library: Path, *, chapters: Optional[list[str]] = 
         except BookError as e:
             out.catalog_error = str(e)
     return out
+
+
+@dataclass
+class ExtractResult:
+    chapter: str
+    ok: bool
+    graph: str = ""
+    summary: str = ""
+    llm_calls: int = 0
+    error: str = ""
+
+
+def extract_chapter(book: Book, chapter: Chapter, *, chunks: Optional[Path] = None, llm: Any = None, model: str = "",
+                    force: bool = False, max_llm_calls: Optional[int] = 10, log_dir: Optional[Path] = None) -> ExtractResult:
+    """Run the extract_graph recipe: the chapter's chunks.yaml (default: <chapter>/chunks.yaml, from `bookgraph ingest`) ->
+    its graph.yaml. Refuses to replace an existing graph.yaml unless `force`."""
+    res = ExtractResult(chapter.id, ok=False)
+    graph = book.graph_path(chapter)
+    src = Path(chunks).expanduser().resolve() if chunks else book.chapter_root(chapter).resolve() / "chunks.yaml"
+    if graph.exists() and not force:
+        res.error = f"{graph} already exists (a hand-edited graph is not replaced): pass --force to extract it again"
+        return res
+    if not src.is_file():
+        res.error = f"no chunks at {src}: run `bookgraph ingest` first, or pass --chunks"
+        return res
+    inputs = {"chunks": str(src), "out_dir": str(graph.parent), "domain": book.global_id(chapter),
+              "subject": f"the {book.title} textbook", "write_roots": write_roots_from_env()}
+    kw: dict[str, Any] = {} if log_dir is None else {"log_dir": log_dir}
+    try:
+        run = run_recipe("extract_graph", inputs, llm=llm if llm is not None else (model or (book.models[0] if book.models else "claude_cli")),
+                         max_llm_calls=max_llm_calls, **kw)
+    except RecipeError as e:
+        res.error = str(e)
+        res.llm_calls = int(((e.summary or {}).get("llm") or {}).get("calls") or 0)
+        return res
+    res.llm_calls, res.graph, res.summary = run.llm_calls, str(run.outputs.get("graph", "")), str(run.outputs.get("summary", ""))
+    if run.exit:
+        res.error = f"exit {run.exit}: {res.summary}"
+        return res
+    if graph.name != "graph.yaml" and Path(res.graph).name == "graph.yaml":       # book.yaml names another file: rename into it
+        Path(res.graph).replace(graph)
+        res.graph = str(graph)
+    res.ok = True
+    return res

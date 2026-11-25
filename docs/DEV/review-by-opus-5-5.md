@@ -989,3 +989,67 @@ rather than a full re-derivation…". The LLM then recaps instead of re-deriving
   (a concept with no prerequisites becomes a primitive, which press documents as a manual fix; tiers computed from the
   edges), and a validate-then-repair loop.
 - **`ingest`** (OpenStax HTML and PDF → chunks.yaml).
+
+---
+
+## 18. Build plan, step 11: Phase 4, part 2: `extract` (Opus 5.5, 2026-11-25)
+
+### 18.1 Design
+
+`bgr extract TARGET -c CHAPTER` turns a chapter's `chunks.yaml` (from `ingest`; the same format press writes) into its
+`graph.yaml`, as the recipe `extract_graph`:
+
+- **prepare.** Read the chunks and format them with press's own `format_chunks_for_prompt`. Check where the graph may be
+  written (`write_ok`); a GUARD, `policies/extract.cedar`, decides.
+- **pass1 and concepts.** pass1 is press's concept prompt, verbatim, except that the subject is no longer fixed. Press's
+  prompts said "a **physics** textbook" for every book, biology and calculus included; it is now "the <book title>
+  textbook". The concepts step parses the answer (fences stripped, the YAML repair). An unreadable answer ends at the
+  `unreadable` exit.
+- **pass2 and check.** pass2 is press's prerequisites prompt. The check step normalizes the answer deterministically, then
+  validates it with book-graph's own checks. The normalization:
+  - a concept with no prerequisite becomes a primitive (press only documents this as a manual fix);
+  - a primitive with prerequisites becomes a concept;
+  - dependencies on unknown ids, or on the node itself, are dropped;
+  - **pass 1's labels are kept** (all 5,749 nodes of press's graphs have none, because pass 2 drops them);
+  - tiers are computed from the edges: primitives 0, every other node 1 + its highest prerequisite.
+- **repair.** Only when check finds problems: one model call that lists the problems and includes the graph, then check
+  again. A graph still invalid is kept as `graph.draft.yaml`, and the run ends at the `invalid` exit.
+- **write** (risky): `graph.yaml` in press's readable style (block literals for `defines`), plus `concept_sources.yaml`
+  (concept → sections).
+- **Retries.** The three model calls retry transient errors. GraphLang counts 3 calls per run. An existing `graph.yaml`
+  is never replaced without `--force`.
+
+### 18.2 Two bugs in press's YAML repair, both fixed
+
+I checked them against press's own functions:
+
+1. **A bare colon got through.** `defines: Something measured: a length, a time.` is exactly the case the repair exists
+   for. In isolation the value parses as a *mapping*, so press judged it valid and left it, and the document then failed:
+   press's `_repair_yaml` plus `yaml.safe_load` raises "mapping values are not allowed here". Fix: the value must parse as
+   a *scalar*.
+2. **Valid YAML got broken.** The repair works line by line. PyYAML's dumper wraps a long quoted string onto the next
+   line, so the first line looks broken, and the repair wrapped it in a second pair of quotes. This happened to **31 of
+   press's 190 extracted graphs**: they parse as they are, but not after the repair. Fixes: parse the document as it is
+   first, and repair only if that fails; and leave a quoted value that continues onto the next line alone.
+
+### 18.3 Verified
+
+- `tests/test_extract.py` (7 tests, scripted model):
+  - extraction with every normalization rule (a colon in `defines`, a dependency-less concept, an unknown dependency,
+    wrong tiers, labels kept, `concept_sources.yaml`), and the graph is then usable by `generate`;
+  - a cycle fixed by the repair call (3 calls);
+  - still invalid: the draft is kept and nothing is written as `graph.yaml`;
+  - an unreadable pass 1 stops after 1 call;
+  - an existing graph is not replaced without `--force`;
+  - normalization in both directions, the two repair fixes, and the CLI.
+- **On real model output: press's 190 extracted graphs, read as pass-2 answers.** All **190 come through `check` valid**.
+  Before the two fixes, 31 failed because of the repair. Normalization changed tiers in 18 graphs and moved a
+  dependency-less concept to the primitives in 3.
+- **Not run:** a real extraction with a real model, which costs about 3 calls per chapter, pass 1 up to about 170k
+  characters of text. It needs a run on one chapter with your model before it is trusted on a book.
+- `pytest`: 96 passed, plus 2 opt-in.
+
+### 18.4 Next
+
+`ingest`: OpenStax HTML and PDF → `chunks.yaml`, press's `pipeline/ingest/`, which needs requests, BeautifulSoup and
+PyMuPDF.

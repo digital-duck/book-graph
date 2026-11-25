@@ -1,0 +1,117 @@
+version: "1.0-graph"
+# extract_graph: a chapter's chunks.yaml in, its graph.yaml out (concept-book-press's two-pass extraction, as a recipe).
+#   1. prepare   read and format the chunks; may it write into out_dir (policies/extract.cedar)
+#   2. pass1     the concepts taught (press's prompt)          -> concepts: parsed, or the run stops at `unreadable`
+#   3. pass2     their prerequisites and tiers (press's prompt) -> check: normalized (bookgraph.extract) and validated
+#   4. repair    only when check finds problems: one model call that lists them, then check again
+#   5. write     (risky) graph.yaml + concept_sources.yaml; a graph still invalid after the repair is kept as
+#                graph.draft.yaml and the run ends at `invalid`
+# The three model calls retry a transient failure twice, 15 s apart. Run it through `bookgraph extract`.
+workflow:
+  name: extract_graph
+  description: Extracts a chapter's concept graph from its chunks with two model passes, normalizes and validates it, repairs it once when it fails, and writes graph.yaml.
+  inputs:
+    - {name: chunks, type: TEXT, description: "absolute path of the chapter's chunks.yaml"}
+    - {name: out_dir, type: TEXT, description: "absolute path of the chapter folder: graph.yaml and concept_sources.yaml go here"}
+    - {name: domain, type: TEXT, description: "the graph's domain: value (the chapter's global id)"}
+    - {name: subject, type: TEXT, default: "a textbook", description: "what the chunks come from, as the prompts name it"}
+    - {name: write_roots, type: TEXT, default: ""}
+  outputs:
+    - {name: graph, type: TEXT, description: "path of the graph written"}
+    - {name: summary, type: TEXT}
+  errors:
+    - {name: refused, code: E_EXTRACT_REFUSED, description: the extract policy refused the output folder}
+    - {name: unreadable, code: E_EXTRACT_UNREADABLE, description: pass 1's answer was not a readable concepts list}
+    - {name: invalid, code: E_EXTRACT_INVALID, description: the graph still failed validation after one repair; the draft was kept}
+resources:
+  prompts:
+    identify_concepts: ./prompts/identify_concepts.md
+    identify_prerequisites: ./prompts/identify_prerequisites.md
+    repair_graph: ./prompts/repair_graph.md
+  policies:
+    extract: ./policies/extract.cedar
+
+steps:
+  - prepare:
+      node: SOLVE
+      in: {chunks: $in.chunks, out_dir: $in.out_dir, write_roots: $in.write_roots}
+      ports: [trigger, complete, in_chunks, in_out_dir, in_write_roots, out_plan]
+      out: plan
+      backend: subprocess
+      command: ["python3", "-I", "-m", "bookgraph.tool", "extract_prepare"]
+      out_type: JSON
+      timeout: 120
+      label: Read and format the chunks
+  - text:     {solve: "json_get(@in_plan, 'chunks_text')", in: {plan: prepare.plan}, out: text}
+  - allowed:
+      guard: policies.extract
+      on: text
+      principal: 'Service::"book-graph"'
+      action: 'Action::"extract_graph"'
+      resource: 'Folder::"chapter"'
+      context_mapping: {write_ok: "json_get(@in_plan, 'write_ok')"}
+      in: {plan: prepare.plan}
+  - why:      {solve: "'refused by policies/extract.cedar: out_dir must be absolute and under your home or the temporary folder'", on: allowed.deny, out: text}
+  - refused:  {output: {graph: why.text, summary: why.text}, on: why, exit: refused}
+
+  - pass1:    {generate: prompts.identify_concepts, on: allowed.allow, in: {subject: $in.subject, chunks_text: text.text}, out: answer, label: Identify the concepts, phases: {exec: {retry: {max: 2, wait_s: 15, on: [transient]}}}}
+  - concepts:
+      node: SOLVE
+      in: {answer: pass1.answer}
+      ports: [trigger, complete, in_answer, out_concepts]
+      out: concepts
+      backend: subprocess
+      command: ["python3", "-I", "-m", "bookgraph.tool", "extract_concepts"]
+      out_type: JSON
+      timeout: 120
+      label: Read pass 1's concepts
+  - c_ok:     {evaluate: "json_get(@in_c, 'ok') == TRUE", in: {c: concepts.concepts}}
+  - c_why:    {solve: "'pass 1 answer unreadable: ' + json_get(@in_c, 'error')", on: c_ok.fail, in: {c: concepts.concepts}, out: text}
+  - unreadable: {output: {graph: c_why.text, summary: c_why.text}, on: c_why, exit: unreadable}
+  - c_yaml:   {solve: "json_get(@in_c, 'concepts_yaml')", on: c_ok.pass, in: {c: concepts.concepts}, out: text}
+  - pass2:    {generate: prompts.identify_prerequisites, in: {subject: $in.subject, domain: $in.domain, concepts_yaml: c_yaml.text}, out: answer, label: Identify the prerequisites, phases: {exec: {retry: {max: 2, wait_s: 15, on: [transient]}}}}
+  - labels:   {solve: "json_get(@in_c, 'labels')", on: pass2, in: {c: concepts.concepts}, out: labels}
+  - check1:
+      node: SOLVE
+      in: {answer: pass2.answer, labels: labels.labels, domain: $in.domain}
+      ports: [trigger, complete, in_answer, in_labels, in_domain, out_checked]
+      out: checked
+      backend: subprocess
+      command: ["python3", "-I", "-m", "bookgraph.tool", "extract_check"]
+      out_type: JSON
+      timeout: 120
+      label: Normalize and validate the graph
+  - ok1:      {evaluate: "json_get(@in_g, 'ok') == TRUE", in: {g: check1.checked}}
+  - g1_yaml:  {solve: "json_get(@in_g, 'graph_yaml')", on: ok1.fail, in: {g: check1.checked}, out: text}
+  - g1_prob:  {solve: "json_get(@in_g, 'problems')", on: g1_yaml, in: {g: check1.checked}, out: text}
+  - repair:   {generate: prompts.repair_graph, in: {subject: $in.subject, problems: g1_prob.text, graph_yaml: g1_yaml.text}, out: answer, label: Repair the graph, phases: {exec: {retry: {max: 2, wait_s: 15, on: [transient]}}}}
+  - check2:
+      node: SOLVE
+      in: {answer: repair.answer, labels: labels.labels, domain: $in.domain}
+      ports: [trigger, complete, in_answer, in_labels, in_domain, out_checked]
+      out: checked
+      backend: subprocess
+      command: ["python3", "-I", "-m", "bookgraph.tool", "extract_check"]
+      out_type: JSON
+      timeout: 120
+      label: Normalize and validate the repaired graph
+  - ok2:      {evaluate: "json_get(@in_g, 'ok') == TRUE", in: {g: check2.checked}}
+  - final:    {solve: "@in_g", on: [ok1.pass, ok2.pass, ok2.fail], in: {g: [check1, check2]}, out: checked}
+  - valid:    {solve: "json_get(@in_g, 'ok')", in: {g: final.checked}, out: valid}
+  - sections: {solve: "json_get(@in_c, 'sections')", on: valid, in: {c: concepts.concepts}, out: sections}
+  - write:
+      node: SOLVE
+      in: {out_dir: $in.out_dir, chunks: $in.chunks, domain: $in.domain, checked: final.checked, valid: valid.valid, labels: labels.labels, sections: sections.sections}
+      ports: [trigger, complete, in_out_dir, in_chunks, in_domain, in_checked, in_valid, in_labels, in_sections, out_written]
+      out: written
+      backend: subprocess
+      command: ["python3", "-I", "-m", "bookgraph.tool", "extract_write"]
+      out_type: JSON
+      timeout: 120
+      risky: true
+      label: Write graph.yaml and concept_sources.yaml
+  - path:     {solve: "json_get(@in_w, 'graph')", in: {w: write.written}, out: text}
+  - summary:  {solve: "json_get(@in_w, 'summary')", on: path, in: {w: write.written}, out: text}
+  - is_valid: {evaluate: "@in_v == TRUE", on: summary, in: {v: valid.valid}}
+  - done:     {output: {graph: path.text, summary: summary.text}, on: is_valid.pass}
+  - invalid:  {output: {graph: path.text, summary: summary.text}, on: is_valid.fail, exit: invalid}
