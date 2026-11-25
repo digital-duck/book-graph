@@ -1,0 +1,167 @@
+version: "1.0-graph"
+# generate_chapter: one chapter's graph in, its concept pages and book index out (the concept-book apps' build_concept_book.spl).
+#   1. prepare    load and validate the graph (a broken one stops here, before any model call), the teaching order, the style guide
+#   2. allowed    GUARD: may it write to output_dir and cache_dir (policies/generate.cedar)
+#   3. sections   a LOOP over the teaching order: the cache, or write -> primitive-budget check -> one refinement; cache and write the page
+#   4. payoff     for an application target only: the cache, or write_payoff; cached
+#   5. index      the book index page: TOC over the order, plus the payoff
+# Paths are absolute (the steps run in this folder). Run it through `bookgraph generate`, or:
+#   graf run generate_chapter.graph.yaml --param chapter_graph=$PWD/chapters/ch01/graph.yaml ...
+workflow:
+  name: generate_chapter
+  description: Writes one concept-book section per node of a chapter graph in teaching order (cache first, a primitive-budget check and one refinement each), then the payoff for an application target and the book index page.
+  inputs:
+    - {name: chapter_graph, type: TEXT, description: "absolute path of the chapter's graph.yaml"}
+    - {name: target, type: TEXT, default: "", description: "the node the book is written toward; empty = the last application"}
+    - {name: style, type: TEXT, default: core, description: "a style profile (levels.resolve_style(level, tags))"}
+    - {name: level, type: TEXT, default: core}
+    - {name: language, type: TEXT, default: en}
+    - {name: model, type: TEXT, default: "", description: "the model's folder name; part of the cache key and the page footer"}
+    - {name: chapter_title, type: TEXT, default: ""}
+    - {name: output_dir, type: TEXT, description: "absolute path; concept_*.html and book_*.html are written here"}
+    - {name: cache_dir, type: TEXT, description: "absolute path of the section cache"}
+    - {name: skip_cache, type: BOOL, default: false}
+    - {name: primitive_budget, type: INTEGER, default: 2}
+    - {name: payoff_weight, type: FLOAT, default: 1.5}
+  outputs:
+    - {name: book, type: TEXT, description: "path of the book index page"}
+    - {name: manifest, type: TEXT, description: "one line per section: generated or cache, and the page written"}
+  errors:
+    - {name: refused, code: E_GENERATE_REFUSED, description: the generate policy refused the output or cache folder}
+resources:
+  prompts:
+    write_section: ./prompts/write_section.md
+    refine_section: ./prompts/refine_section.md
+    write_payoff: ./prompts/write_payoff.md
+  policies:
+    generate: ./policies/generate.cedar
+
+steps:
+  - prepare:
+      node: SOLVE
+      in: {chapter_graph: $in.chapter_graph, target: $in.target, style: $in.style, language: $in.language, payoff_weight: $in.payoff_weight, output_dir: $in.output_dir, cache_dir: $in.cache_dir}
+      ports: [trigger, complete, in_chapter_graph, in_target, in_style, in_language, in_payoff_weight, in_output_dir, in_cache_dir, out_plan]
+      out: plan
+      backend: subprocess
+      command: ["python3", "-I", "-m", "bookgraph.tool", "prepare"]
+      out_type: JSON
+      timeout: 60
+      label: Load and validate the graph; the teaching order
+  - n:        {solve: "json_get(@in_plan, 'n')", in: {plan: prepare.plan}, out: n}
+  - guide:    {solve: "json_get(@in_plan, 'style_guide')", on: n, in: {plan: prepare.plan}, out: guide}
+  - lang:     {solve: "json_get(@in_plan, 'language_label')", on: guide, in: {plan: prepare.plan}, out: lang}
+  - target:   {solve: "json_get(@in_plan, 'target')", on: lang, in: {plan: prepare.plan}, out: target}
+  - allowed:
+      guard: policies.generate
+      on: target
+      principal: 'Service::"book-graph"'
+      action: 'Action::"generate_chapter"'
+      resource: 'Folder::"output"'
+      context_mapping: {write_ok: "json_get(@in_plan, 'write_ok')"}
+      in: {plan: prepare.plan}
+  - why:      {solve: "'refused by policies/generate.cedar: output_dir and cache_dir must be absolute and under your home or the temporary folder'", on: allowed.deny, out: text}
+  - refused:  {output: {book: why.text, manifest: why.text}, on: why, exit: refused}
+
+  # 3. one round per node of the teaching order
+  - sections:
+      loop: "@in_n"
+      on: allowed.allow
+      while: "@node_index < @in_n"
+      index: node_index
+      in: {chapter_graph: $in.chapter_graph, target: target.target, style: $in.style, language: $in.language, model: $in.model, payoff_weight: $in.payoff_weight, skip_cache: $in.skip_cache, cache_dir: $in.cache_dir, output_dir: $in.output_dir, chapter_title: $in.chapter_title, level: $in.level, primitive_budget: $in.primitive_budget, style_guide: guide.guide, language_label: lang.lang, n: n.n}
+      state:
+        manifest: {from: line.manifest, init: ""}
+      steps:
+        - round:
+            node: SOLVE
+            in: {chapter_graph: $loop.chapter_graph, target: $loop.target, style: $loop.style, language: $loop.language, model: $loop.model, payoff_weight: $loop.payoff_weight, skip_cache: $loop.skip_cache, cache_dir: $loop.cache_dir, node_index: $loop.node_index}
+            ports: [trigger, complete, in_chapter_graph, in_target, in_style, in_language, in_model, in_payoff_weight, in_skip_cache, in_cache_dir, in_node_index, out_round]
+            out: round
+            backend: subprocess
+            command: ["python3", "-I", "-m", "bookgraph.tool", "round"]
+            out_type: JSON
+            timeout: 60
+            label: The node, its context, the cached section
+        - which:    {solve: "json_get(@in_round, 'node')", in: {round: round.round}, out: node}
+        - label:    {solve: "json_get(@in_round, 'label')", on: which, in: {round: round.round}, out: label}
+        - context:  {solve: "json_get(@in_round, 'context')", on: label, in: {round: round.round}, out: context}
+        - hit:      {evaluate: "json_get(@in_round, 'hit') == TRUE", on: context, in: {round: round.round}}
+        - cached:   {solve: "json_get(@in_round, 'cached')", on: hit.pass, in: {round: round.round}, out: section}
+        - write:    {generate: prompts.write_section, on: hit.fail, in: {concept: which.node, label: label.label, context: context.context, style_guide: $loop.style_guide, language_label: $loop.language_label}, out: section, label: Write the section}
+        - check:
+            node: SOLVE
+            in: {chapter_graph: $loop.chapter_graph, section: write.section, primitive_budget: $loop.primitive_budget}
+            ports: [trigger, complete, in_chapter_graph, in_section, in_primitive_budget, out_check]
+            out: check
+            backend: subprocess
+            command: ["python3", "-I", "-m", "bookgraph.tool", "check"]
+            out_type: JSON
+            timeout: 60
+            label: Primitive-budget check
+        - ok:       {evaluate: "json_get(@in_check, 'ok') == TRUE", in: {check: check.check}}
+        - feedback: {solve: "json_get(@in_check, 'feedback')", on: ok.fail, in: {check: check.check}, out: feedback}
+        - refine:   {generate: prompts.refine_section, in: {section: write.section, feedback: feedback.feedback, style_guide: $loop.style_guide, language_label: $loop.language_label}, out: section, label: Refine after the check}
+        - final:    {solve: "@in_section", on: [cached, ok.pass, refine], in: {section: [cached, write, refine]}, out: section}
+        - store:
+            node: SOLVE
+            in: {chapter_graph: $loop.chapter_graph, target: $loop.target, style: $loop.style, language: $loop.language, model: $loop.model, payoff_weight: $loop.payoff_weight, cache_dir: $loop.cache_dir, output_dir: $loop.output_dir, chapter_title: $loop.chapter_title, level: $loop.level, round: round.round, section: final.section, manifest: $loop.manifest}
+            ports: [trigger, complete, in_chapter_graph, in_target, in_style, in_language, in_model, in_payoff_weight, in_cache_dir, in_output_dir, in_chapter_title, in_level, in_round, in_section, in_manifest, out_stored]
+            out: stored
+            backend: subprocess
+            command: ["python3", "-I", "-m", "bookgraph.tool", "store"]
+            out_type: JSON
+            timeout: 60
+            risky: true
+            label: Cache the section and write its page
+        - line:     {solve: "json_get(@in_stored, 'manifest')", in: {stored: store.stored}, out: manifest}
+
+  # 4. the payoff (an application target only)
+  - payoff_round:
+      node: SOLVE
+      on: sections
+      in: {chapter_graph: $in.chapter_graph, target: target.target, style: $in.style, language: $in.language, model: $in.model, payoff_weight: $in.payoff_weight, skip_cache: $in.skip_cache, cache_dir: $in.cache_dir}
+      ports: [trigger, complete, in_chapter_graph, in_target, in_style, in_language, in_model, in_payoff_weight, in_skip_cache, in_cache_dir, out_round]
+      out: round
+      backend: subprocess
+      command: ["python3", "-I", "-m", "bookgraph.tool", "payoff_round"]
+      out_type: JSON
+      timeout: 60
+      label: The payoff's inputs, the cached payoff
+  - needed:   {evaluate: "json_get(@in_round, 'needed') == TRUE", in: {round: payoff_round.round}}
+  - none:     {solve: "''", on: needed.fail, out: payoff}
+  - p_hit:    {evaluate: "json_get(@in_round, 'hit') == TRUE", on: needed.pass, in: {round: payoff_round.round}}
+  - p_cached: {solve: "json_get(@in_round, 'cached')", on: p_hit.pass, in: {round: payoff_round.round}, out: payoff}
+  - p_label:  {solve: "json_get(@in_round, 'target_label')", on: p_hit.fail, in: {round: payoff_round.round}, out: v}
+  - p_ctx:    {solve: "json_get(@in_round, 'target_context')", on: p_label, in: {round: payoff_round.round}, out: v}
+  - p_pre:    {solve: "json_get(@in_round, 'prereqs')", on: p_ctx, in: {round: payoff_round.round}, out: v}
+  - p_apps:   {solve: "json_get(@in_round, 'apps')", on: p_pre, in: {round: payoff_round.round}, out: v}
+  - p_write:  {generate: prompts.write_payoff, on: p_apps, in: {target: p_label.v, target_context: p_ctx.v, prerequisites: p_pre.v, applications: p_apps.v, style_guide: guide.guide, language_label: lang.lang}, out: payoff, label: Write the payoff}
+  - p_final:  {solve: "@in_payoff", on: [none, p_cached, p_write], in: {payoff: [none, p_cached, p_write]}, out: payoff}
+  - p_store:
+      node: SOLVE
+      on: p_write
+      in: {chapter_graph: $in.chapter_graph, target: target.target, style: $in.style, language: $in.language, model: $in.model, payoff_weight: $in.payoff_weight, cache_dir: $in.cache_dir, round: payoff_round.round, payoff: p_write.payoff}
+      ports: [trigger, complete, in_chapter_graph, in_target, in_style, in_language, in_model, in_payoff_weight, in_cache_dir, in_round, in_payoff, out_stored]
+      out: stored
+      backend: subprocess
+      command: ["python3", "-I", "-m", "bookgraph.tool", "payoff_store"]
+      out_type: JSON
+      timeout: 60
+      risky: true
+      label: Cache the payoff
+
+  # 5. the book index
+  - index:
+      node: SOLVE
+      on: [p_final, p_store]
+      in: {chapter_graph: $in.chapter_graph, target: target.target, style: $in.style, language: $in.language, model: $in.model, payoff_weight: $in.payoff_weight, output_dir: $in.output_dir, chapter_title: $in.chapter_title, level: $in.level, payoff: p_final.payoff}
+      ports: [trigger, complete, in_chapter_graph, in_target, in_style, in_language, in_model, in_payoff_weight, in_output_dir, in_chapter_title, in_level, in_payoff, out_book]
+      out: book
+      backend: subprocess
+      command: ["python3", "-I", "-m", "bookgraph.tool", "finish"]
+      out_type: JSON
+      timeout: 60
+      risky: true
+      label: Write the book index page
+  - path:     {solve: "json_get(@in_book, 'book')", in: {book: index.book}, out: path}
+  - done:     {output: {book: path.path, manifest: sections.manifest}}

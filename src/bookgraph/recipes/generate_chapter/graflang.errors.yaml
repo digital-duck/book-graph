@@ -1,0 +1,6 @@
+# Error codes of the generate_chapter recipe.
+errors:
+  - code: E_GENERATE_REFUSED
+    description: the generate policy refused to write to this output or cache folder
+    cause: output_dir or cache_dir is not absolute, or not under your home or the temporary folder
+    remedy: use a library under your home folder, or add a root to BOOKGRAPH_WRITE_ROOTS; see policies/generate.cedar

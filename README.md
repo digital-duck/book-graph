@@ -1,2 +1,64 @@
 # book-graph
-graflang based app for Concept-Book, SPL dependency dropped
+
+Concept-books from graphs, over [GraphLang](https://github.com/digital-duck/graflang). A chapter is a `graph.yaml`
+(primitives, concepts, applications); `bookgraph` writes one concept-book section per node in teaching order, plus a
+payoff and an index page. SPL is gone: generation is a GraphLang recipe.
+
+**press > book > chapter.** A *book* belongs to a *press*, and has *chapters*, each with its own graph. (The earlier
+concept-book apps called a chapter a "domain" and forked a repo per book; here a book is data in a shared library.)
+
+```
+~/book-graph/library/                      # or $BOOKGRAPH_LIBRARY, or --library
+  catalog.json                             # every press, book and chapter
+  <press>/<book>/book.yaml
+  <press>/<book>/chapters/<chapter>/graph.yaml
+  <press>/<book>/chapters/<chapter>/output/<level>.<lang>/<model>/html/{concept,book}_<node>[_<lang>].html
+  <press>/<book>/chapters/<chapter>/.bg_cache/        # section cache: a hit costs no model call
+```
+
+## Quick start
+
+```bash
+pip install -e ".[dev]"                    # installs `bookgraph` (alias `bgr`)
+
+bgr new acme demo                          # scaffold a book with a one-chapter starter graph
+bgr validate acme/demo                     # acyclic, reducible to primitives, every node has `defines`
+bgr order ~/book-graph/library/acme/demo/chapters/ch01/graph.yaml     # the teaching order
+bgr generate acme/demo --llm claude_cli:claude-sonnet-5-5 --level core --lang en
+bgr list
+```
+
+Existing ConceptBook graphs load unchanged (`bgr validate path/to/calculus_ch01/input/graph.yaml`).
+
+## book.yaml
+
+```yaml
+press: acme
+book: demo
+title: Demo Book
+levels: [core]                  # intro | core | college | research
+languages: [en]
+models: [claude_cli:claude-sonnet-5-5]
+tags: [math]                    # math/physics/engineering keep proof rigor at research level
+chapters:
+  - {id: ch01, title: Chapter 1, graph: chapters/ch01/graph.yaml, capstone: budget}
+```
+
+## Commands
+
+| Command | Purpose |
+|---|---|
+| `bgr new PRESS BOOK` | scaffold a book |
+| `bgr validate TARGET` | a graph.yaml, or every chapter of a book; exit 1 on any problem |
+| `bgr order GRAPH [--target NODE]` | the order sections are written in |
+| `bgr generate TARGET [-c CHAPTER] [--level L] [--lang X] [--llm A:M] [--skip-cache] [--max-llm-calls N]` | run the `generate_chapter` recipe for every chapter x level x language x model |
+| `bgr catalog [TARGET]` | refresh `catalog.json` for one book or the whole library |
+| `bgr list` | presses, books, chapters |
+
+TARGET is a `book.yaml`, a book folder, or `press/book` under the library.
+
+## Status
+
+Packaging, validation, generation and the catalog are done and tested with a scripted model (no LLM calls in tests). Not
+yet: ingestion/extraction from PDFs (concept-book-press), the web app, publishing, and `bookgraph migrate` for the `cb-*`
+repos. See `docs/` and `concept-book/docs/DEV/readme-book-graph-plan.md`.
