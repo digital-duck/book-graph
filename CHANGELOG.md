@@ -15,4 +15,5 @@
 - `book.yaml: legacy_cache:` reuses an SPL app's spl3 cache (read-only, `bookgraph.legacy`), so migrated books do not pay again for existing sections.
 - Pages keep the `spl-credit` footer class (conceptbook-app strips it before reading text); `graflang` pinned to `>=0.3.0,<0.4`.
 - `bgr migrate REPO` imports a `cb-*` repo (chapters keep their old ids as `global_id`; pages, navigators and book-level files are kept); `bgr export TARGET DOMAINS` writes a book into an app's `public/domains/` with the apps' flat `catalog.json`, its counts and page lists recomputed from disk.
+- Navigators: `navigator.py` ports concept-book-base's `graph.html` page verbatim (byte-identical for all 260 existing graphs); `export` and `bgr navigator` write it where it is missing or the graph changed (hash in `<chapter>/.navigator`).
 - A damaged `catalog.json` is refused, not overwritten; unique temp files in the cache; one-pass page templating; `press/book` beats a same-named local folder (B13).

@@ -55,6 +55,7 @@ chapters:
 | `bgr catalog [TARGET]` | refresh `catalog.json` for one book or the whole library |
 | `bgr list` | presses, books, chapters |
 | `bgr migrate REPO [--press P] [--book SLUG] [--adapter A]` | import a `cb-*` concept-book repo: chapters, pages, navigators, and its spl3 cache as `legacy_cache:` |
+| `bgr navigator TARGET [-c CHAPTER] [--force]` | write each chapter's navigator (`output/graph.html`) where it is missing or its graph changed |
 | `bgr export TARGET DOMAINS` | write a book into a web app's `public/domains/` (graphs, pages, navigators, flat `catalog.json`) |
 
 TARGET is a `book.yaml`, a book folder, or `press/book` under the library.
@@ -63,4 +64,4 @@ TARGET is a `book.yaml`, a book folder, or `press/book` under the library.
 
 Packaging, validation, generation, the catalog, `migrate` and `export` are done and tested with a scripted model (no LLM
 calls in tests). `migrate` then `export` reproduces each `cb-*` repo's `public/domains/` file for file. Not yet:
-ingestion/extraction from PDFs (concept-book-press), the web app and `build`, publishing, and navigators for new chapters. See `docs/` and `concept-book/docs/DEV/readme-book-graph-plan.md`.
+ingestion/extraction from PDFs (concept-book-press), the web app and `build`, and publishing. See `docs/` and `concept-book/docs/DEV/readme-book-graph-plan.md`.

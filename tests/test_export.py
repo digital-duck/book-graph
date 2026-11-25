@@ -72,7 +72,7 @@ def test_export_keeps_other_entries_and_replaces_its_own_in_place(library, tmp_p
     export_book(book, out)
     cat = json.loads((out / "catalog.json").read_text())
     assert [e["id"] for e in cat] == ["other_ch01", "demo_ch01"] and cat[1]["name"] == "Chapter 1"
-    assert cat[1]["has_book"] is False and cat[1]["has_navigator"] is False
+    assert cat[1]["has_book"] is False and cat[1]["has_navigator"] is True           # written by export (bookgraph.navigator)
 
 
 def test_generated_pages_are_exported(library, tmp_path):

@@ -4,7 +4,7 @@ The web apps (concept-book-base and its `cb-*` forks, conceptbook-app) read `pub
 
     <domains>/catalog.json                          a flat list, one entry per chapter (below)
     <domains>/<global id>/input/graph.yaml
-    <domains>/<global id>/output/graph.html         the navigator (vis.js), when there is one
+    <domains>/<global id>/output/graph.html         the navigator (vis.js, bookgraph.navigator; written when missing or stale)
     <domains>/<global id>/output/<level>.<lang>[/<model>]/html/{concept,book}_<node>[_<lang>].html
     <domains>/graph.yaml, groups.json, ...          book-level files; kept in the library as <book>/domains/
 
@@ -33,6 +33,7 @@ from .book import LEVELS, Book, load_book
 from .catalog import _locked, register_book
 from .exceptions import BookError
 from .graph import load_graph
+from .navigator import graph_hash, navigator_stale, write_navigator
 from .paths import book_dir, lang_suffix, safe_segment
 
 # Fields computed from the graph and the files on disk; every other catalog field comes from book.yaml as it is.
@@ -99,13 +100,29 @@ def _write_list(path: Path, catalog: list[dict[str, Any]]) -> None:
     os.replace(tmp, path)
 
 
+def ensure_navigators(book: Book, chapters: list[Any] | None = None, *, force: bool = False) -> list[Path]:
+    """Write <chapter>/output/graph.html (bookgraph.navigator) where it is missing or made from another version of the
+    chapter's graph.yaml (the hash in <chapter>/.navigator), or everywhere with `force`. A migrated chapter keeps the
+    navigator it came with until its graph is edited."""
+    written = []
+    for ch in chapters if chapters is not None else book.chapters:
+        root = book.chapter_root(ch)
+        out, stamp = root / "output" / "graph.html", root / ".navigator"
+        if force or navigator_stale(book.graph_path(ch), out, stamp):
+            written.append(write_navigator(book.graph_path(ch), out, stamp))
+    return written
+
+
 def export_book(book: Book, domains: str | Path) -> list[dict[str, Any]]:
     """Write the book's chapters into `domains` (an app's public/domains) and merge their entries into its catalog.json.
 
     Entries of other chapters are kept, in place; a chapter already listed is replaced where it stands. Returns the entries
     written. Raises BookError for a chapter whose graph cannot be read, before anything is written."""
     domains = Path(domains)
-    entries = [(ch, chapter_entry(book, ch)) for ch in book.chapters]       # every graph is read before any write
+    for ch in book.chapters:                                               # every graph is read before any write
+        load_graph(book.graph_path(ch))
+    ensure_navigators(book)
+    entries = [(ch, chapter_entry(book, ch)) for ch in book.chapters]
     for ch, entry in entries:
         dest = domains / safe_segment(entry["id"], "global id")
         (dest / "input").mkdir(parents=True, exist_ok=True)
@@ -187,6 +204,8 @@ def migrate_repo(repo: str | Path, library: Path, *, press: str = "digital-duck"
             shutil.copyfile(src / "input" / "concept_sources.yaml", dest / "concept_sources.yaml")
         if (src / "output").is_dir():
             shutil.copytree(src / "output", dest / "output", dirs_exist_ok=True)
+        if (dest / "output" / "graph.html").is_file():          # the repo's navigator matches the graph copied with it
+            (dest / ".navigator").write_text(graph_hash(dest / "graph.yaml") + "\n", encoding="utf-8")
         ch: dict[str, Any] = {"id": cid, "title": str(e.get("name") or gid), "graph": f"chapters/{cid}/graph.yaml"}
         if e.get("capstone"):
             ch["capstone"] = e["capstone"]

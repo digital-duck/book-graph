@@ -175,6 +175,24 @@ def export(library: Path, target: str, domains: str) -> None:
 
 
 @main.command()
+@click.argument("target")
+@click.option("--chapter", "-c", "chapters", multiple=True, help="only this chapter (repeatable)")
+@click.option("--force", is_flag=True, help="rewrite every navigator, also ones that are up to date (e.g. migrated ones)")
+@click.pass_obj
+@_guard
+def navigator(library: Path, target: str, chapters, force: bool) -> None:
+    """Write each chapter's navigator, output/graph.html (the web apps' interactive concept graph), where it is missing or
+    older than the chapter's graph.yaml; `export` does the same."""
+    from .export import ensure_navigators
+    book = load_book(_find_book(target, library))
+    todo = [book.chapter(c) for c in chapters] if chapters else book.chapters
+    written = ensure_navigators(book, todo, force=force)
+    for p in written:
+        click.echo(f"wrote {p}")
+    click.echo(f"{len(written)} of {len(todo)} navigator(s) written")
+
+
+@main.command()
 @click.argument("repo", type=click.Path(exists=True, file_okay=False))
 @click.option("--press", default="digital-duck", show_default=True)
 @click.option("--book", "slug", default="", help="the book slug (default: the repo name without `cb-`)")

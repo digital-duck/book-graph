@@ -592,3 +592,57 @@ then generates with 0 model calls.
 - **The web build itself** (Phase 2: one `web/`, then `bgr build` = `export` + the Vite app with `site:` config), then
   `publish`.
 - **Resumable book runs** (9.2-5), the `validate` additions (9.2-7), replay checks and `verify_section` (9.2-6).
+
+---
+
+## 11. Build plan, step 4: the navigator (Opus 5.5, 2026-11-25)
+
+### 11.1 Which generator to port
+
+There are six different `scripts/concept_graph.py` in the repos — the plan's §1 code drift in miniature:
+
+- most `cb-*` repos share one older copy, without per-language `labels`;
+- concept-book-base (also in cb-graph-network, cb-meta-health and cb-world-powers) adds `labels`;
+- conceptbook-app adds a `timeline` layout and changes notes handling;
+- cb-graph-intro, cb-zinets and SPL.py each have their own.
+
+I checked which generator reproduces which shipped `graph.html` (cb-zinets left out):
+
+- each repo's own copy reproduces most of its own pages;
+- the concept-book-base copy reproduces all 9 of cb-meta-health's;
+- a few pages match none of them, for example cb-graph-network's 8 and 16 of cb-world-powers' 17.
+
+The plan folds concept-book-base's `src/` into the one `web/` (Phase 2), and its `GraphViewer.js` is the consumer whose
+contract matters, so I ported **concept-book-base's** generator.
+
+### 11.2 What was added
+
+- **`navigator.py`**: `_load_yaml_graph` and `_to_html` copied **verbatim** from that script, extracted programmatically,
+  with only the PyYAML import guard removed. It also passes the same `domain_name` the script derived (`"graph"`), so
+  readers' saved notes and positions (localStorage key `graph`) keep working.
+- **When a navigator is written:**
+  - `export` and the new `bgr navigator TARGET [-c] [--force]` write `<chapter>/output/graph.html` when it is missing,
+    or when the graph's sha256 differs from the one recorded in `<chapter>/.navigator`. That stamp file sits outside
+    `output/`, so it is never exported.
+  - `migrate` stamps the navigators it copies, so a migrated chapter keeps its own page until its graph is edited.
+  - The check is on content, not mtimes: a git checkout or a copy sets mtimes arbitrarily. My first version compared
+    mtimes, and the tests caught it rewriting every migrated navigator.
+
+### 11.3 Verified
+
+- **Identical to the script:** the output matches what concept-book-base's script produces, byte for byte, for all
+  **260 / 260** existing chapter graphs. It also matches cb-meta-health's shipped `graph.html`, **9 / 9**. A test repeats
+  this comparison, and skips when concept-book-base is not checked out.
+- **Round trip:** `migrate` then `export` is still byte-identical for all 13 repos, so migrated navigators are left alone.
+- **New chapters:** they now export with `has_navigator: true` and a working page.
+- **Tests:** 54 passed.
+
+### 11.4 Still open
+
+- **conceptbook-app's additions** (the `timeline` layout through graph.yaml's `layout:` key, and its notes handling) are
+  not ported. Decide when the aggregator integration is designed: port the conceptbook-app variant instead, or add the
+  timeline mode on top.
+- **Older navigators.** Pages made by the older generators have no `labels`, so the app cannot relabel them per
+  language. `bgr navigator --force` upgrades them to the base version. Their notes key stays `graph`, but I have not compared
+  the two versions' pages visually. Check one book in the app before running it on all of them.
+- **Remaining plan steps:** the web build (Phase 2, `bgr build`), `publish`, resumable book runs, and the §9.2 items 6–7.
