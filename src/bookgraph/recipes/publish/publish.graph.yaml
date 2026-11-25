@@ -1,0 +1,67 @@
+version: "1.0-graph"
+# publish: a built site in, pushed to a git branch (GitHub Pages: gh-pages) as one fresh commit. No model calls.
+#   1. check    the facts: is it a built site, is the remote reachable, is the branch not the default one, was the site
+#               built for the path it will be served at
+#   2. allowed  GUARD: policies/publish.cedar permits the push only when every fact holds
+#   3. deploy   (risky) commit the site as a fresh history and force-push it to the branch; dry_run: only report
+# Run it through `bookgraph publish`, which builds the site and reads the target from book.yaml (bookgraph.publish).
+workflow:
+  name: publish
+  description: Pushes a built concept-book site to a git branch as one fresh commit, after a policy checks the site, the remote, the branch and the base path.
+  inputs:
+    - {name: site_dir, type: TEXT, description: "absolute path of the built site (bookgraph build)"}
+    - {name: remote, type: TEXT, description: "a GitHub repository URL, or the absolute path of a local repository"}
+    - {name: branch, type: TEXT, default: gh-pages}
+    - {name: cname, type: TEXT, default: "", description: "a custom domain: written as CNAME; the site is then served at /"}
+    - {name: base, type: TEXT, default: "", description: "the base path the site was built for (book.yaml site.base)"}
+    - {name: message, type: TEXT, default: "Publish with book-graph"}
+    - {name: dry_run, type: BOOL, default: false}
+  outputs:
+    - {name: summary, type: TEXT, description: "what was pushed, or would be, or why the policy refused"}
+    - {name: commit, type: TEXT, description: "the pushed commit, empty for a dry run or a refusal"}
+  errors:
+    - {name: refused, code: E_PUBLISH_REFUSED, description: the publish policy refused this site, remote, branch or base path}
+resources:
+  policies:
+    publish: ./policies/publish.cedar
+
+steps:
+  - check:
+      node: SOLVE
+      in: {site_dir: $in.site_dir, remote: $in.remote, branch: $in.branch, cname: $in.cname, base: $in.base}
+      ports: [trigger, complete, in_site_dir, in_remote, in_branch, in_cname, in_base, out_facts]
+      out: facts
+      backend: subprocess
+      command: ["python3", "-I", "-m", "bookgraph.tool", "publish_check"]
+      env_passthrough: [HOME, SSH_AUTH_SOCK]        # git ls-remote authenticates with the caller's SSH keys or agent
+      out_type: JSON
+      timeout: 90
+      label: Is it a built site, a reachable remote, a branch it may replace, the right base path
+  - allowed:
+      guard: policies.publish
+      on: check
+      principal: 'Service::"book-graph"'
+      action: 'Action::"publish"'
+      resource: 'Branch::"site"'
+      context_mapping: {site_ok: "json_get(@in_facts, 'site_ok')", remote_ok: "json_get(@in_facts, 'remote_ok')", branch_ok: "json_get(@in_facts, 'branch_ok')", base_ok: "json_get(@in_facts, 'base_ok')"}
+      in: {facts: check.facts}
+  - why:      {solve: "'refused by policies/publish.cedar: ' + json_get(@in_facts, 'problems')", on: allowed.deny, in: {facts: check.facts}, out: text}
+  - none:     {solve: "''", on: why, out: text}
+  - refused:  {output: {summary: why.text, commit: none.text}, on: none, exit: refused}
+
+  - deploy:
+      node: SOLVE
+      on: allowed.allow
+      in: {site_dir: $in.site_dir, remote: $in.remote, branch: $in.branch, cname: $in.cname, message: $in.message, dry_run: $in.dry_run}
+      ports: [trigger, complete, in_site_dir, in_remote, in_branch, in_cname, in_message, in_dry_run, out_result]
+      out: result
+      backend: subprocess
+      command: ["python3", "-I", "-m", "bookgraph.tool", "publish_deploy"]
+      env_passthrough: [HOME, SSH_AUTH_SOCK]        # git push authenticates with the caller's SSH keys or agent
+      out_type: JSON
+      timeout: 900
+      risky: true
+      label: Commit the site as a fresh history and force-push it to the branch
+  - summary:  {solve: "json_get(@in_result, 'summary')", in: {result: deploy.result}, out: text}
+  - commit:   {solve: "json_get(@in_result, 'commit')", on: summary, in: {result: deploy.result}, out: text}
+  - done:     {output: {summary: summary.text, commit: commit.text}, on: commit}

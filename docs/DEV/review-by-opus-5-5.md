@@ -703,3 +703,63 @@ I diffed every cb repo's frontend against concept-book-base:
 - **conceptbook-app** is a separate, larger frontend (multi-tenant). The plan and WEN leave it alone; it reads the same
   `catalog.json`/`public/domains` contract that `export` writes.
 - **Still to do:** `publish` (GitHub Pages), resumable book runs, ingestion, and the §9.2 items 6–7.
+
+---
+
+## 13. Build plan, step 6: publish (Opus 5.5, 2026-11-25)
+
+### 13.1 Design
+
+Today every `cb-*` repo deploys with `npm run deploy` = `vite build && gh-pages -d dist --no-history --dotfiles`: a
+force-push of the built site, with no history, to the repo's `gh-pages` branch over SSH. `bgr publish` keeps that result,
+and makes it the policy-checked step the plan asks for (§2.3: "Publishing becomes an explicit policy-checked step
+instead of a shell script").
+
+- **The target.** `book.yaml: publish: {repo: OWNER/NAME | remote: URL-or-path, branch: gh-pages, cname: ...}`. `migrate`
+  fills `repo` from the repo's GitHub `origin`.
+- **The recipe** (`recipes/publish/`, no model calls):
+  - `check` gathers four facts;
+  - a GUARD (`policies/publish.cedar`) permits the push only when all four hold;
+  - `deploy` (`risky: true`) copies the site, dotfiles included, adds `CNAME` if set, commits it as the single commit of a
+    fresh history, and force-pushes it to the branch;
+  - a refusal ends at the `refused` exit (`E_PUBLISH_REFUSED`), with one plain reason per failed fact.
+
+  | Fact | Holds when |
+  |---|---|
+  | `site_ok` | the folder is a built site (`index.html`, `domains/catalog.json`) |
+  | `remote_ok` | the remote is a GitHub URL or a local repository, and answers `git ls-remote` |
+  | `branch_ok` | the branch is not the remote's default branch (read with `ls-remote --symref`), nor main/master: a publish replaces the branch's whole history |
+  | `base_ok` | the site was built for where it will be served (`/<repo>/` on project pages, `/` on `<owner>.github.io` or a custom domain). The base is read from the built `index.html`'s asset URLs, so `--no-build` cannot publish a folder built for another path. |
+
+- **Environment.** Both steps get `HOME` and `SSH_AUTH_SOCK` through GraphLang's `env_passthrough` (names only), so git
+  uses your SSH keys or agent, and nothing else of your environment. `GIT_TERMINAL_PROMPT=0`, so a step never waits for a
+  password.
+- **The CLI** builds first (unless `--no-build`), then asks before replacing the live site (unless `--yes`). `--dry-run`
+  goes through the same check and policy, and pushes nothing.
+
+### 13.2 Verified
+
+- **Tests (`tests/test_publish.py`).** They push only to local bare repositories, under an isolated `HOME` with its own git
+  identity. They cover:
+  - a dry run pushes nothing;
+  - a publish puts exactly the site, plus `CNAME`, on `gh-pages` as one commit, and leaves `main` untouched;
+  - publishing again keeps a single commit;
+  - `main`/`master`, an unbuilt site and an unknown remote are refused;
+  - the base-path rules, including a built page that disagrees with book.yaml;
+  - the CLI's confirmation prompt (answering "n" pushes nothing), `--dry-run`, and `--yes -m`.
+- **Against the real GitHub remote, read-only.** A migrated cb-meta-health, built and published with `--dry-run`:
+  - the policy allowed it ("would push 917 file(s) … git@github.com:digital-duck/cb-meta-health.git gh-pages");
+  - with `branch: main` it was refused ("the remote's default or a protected branch");
+  - with a wrong `site.base` it was refused ("built for '/meta-health/' but will be served at '/cb-meta-health/'").
+
+  Only `git ls-remote` reached GitHub; **nothing was pushed to any real repository.**
+- `pytest`: 66 passed, plus 1 opt-in; `graf validate` on both recipes passes.
+
+### 13.3 Before the first real publish
+
+- **It replaces the live site.** A real `bgr publish` replaces that repo's `gh-pages`, the live site, with the shared
+  app's build. Do it one book at a time, after checking the dry run and the built site locally (`npx vite preview`).
+  cb-meta-health is the safest first candidate, because its frontend is already the current version (§12.3).
+- **Set a real title first.** The older repos' titles say "ConceptBook" (§12.4): set `site.title` before publishing them.
+- **Still to do:** `serve` (the local API behind Generate/PDF/Settings), resumable book runs, ingestion, and the §9.2
+  items 6–7.

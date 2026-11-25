@@ -22,7 +22,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -258,6 +260,9 @@ def migrate_repo(repo: str | Path, library: Path, *, press: str = "digital-duck"
                             "levels": levels or ["core"], "languages": langs or ["en"],
                             "models": [f"{adapter}:{m}" for m in models], "tags": tags, "site": {"base": f"/{repo.name}/"}}
     spec["site"].update(_site_strings(repo))
+    origin = subprocess.run(["git", "-C", str(repo), "remote", "get-url", "origin"], capture_output=True, text=True).stdout.strip()
+    if m := re.match(r"^(?:git@github\.com:|https://github\.com/|ssh://git@github\.com/)([\w.-]+/[\w.-]+?)(?:\.git)?/?$", origin):
+        spec["publish"] = {"repo": m.group(1)}                   # the repo's own GitHub Pages, as `npm run deploy` used it
     spl = repo / "spl" / ".spl"
     if (spl / "content_meta.db").is_file():
         spec["legacy_cache"] = str(spl)

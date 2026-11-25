@@ -9,6 +9,7 @@
     models: [claude_cli:claude-sonnet-5-5]       # an adapter:model string; its file-name form is the part after ':'
     tags: [math]
     site: {base: /cb-linalg/, brand: {}}                                  # optional, read by the web build
+    publish: {repo: digital-duck/cb-linalg}       # optional: `bookgraph publish` target (branch gh-pages; see bookgraph.publish)
     legacy_cache: ../cb-linalg/spl/.spl          # optional: the SPL app's spl3 cache, read (never written) so its sections are reused
     chapters:
       - {id: ch01, title: Systems of equations, graph: chapters/ch01/graph.yaml, capstone: gaussian_elimination}
@@ -53,6 +54,7 @@ class Book:
     tags: list[str] = field(default_factory=list)
     source: dict[str, Any] = field(default_factory=dict)
     site: dict[str, Any] = field(default_factory=dict)
+    publish: dict[str, Any] = field(default_factory=dict)   # {repo | remote, branch, cname}: bookgraph.publish
     root: Path = field(default_factory=Path)          # the folder holding book.yaml
     legacy_cache: str = ""                            # absolute path of an SPL app's `spl/.spl` cache folder (bookgraph.legacy), or ""
 
@@ -119,6 +121,7 @@ def load_book(path: str | Path) -> Book:
     return Book(press=press, book=slug, title=str(raw.get("title") or slug), chapters=chapters, levels=levels,
                 languages=[str(x) for x in raw.get("languages") or ["en"]], models=[str(x) for x in raw.get("models") or []],
                 tags=[str(x) for x in raw.get("tags") or []], source=dict(raw.get("source") or {}), site=dict(raw.get("site") or {}),
+                publish=dict(raw.get("publish") or {}),
                 root=p.parent.resolve(),
                 legacy_cache=str((p.parent / str(raw["legacy_cache"])).expanduser().resolve()) if raw.get("legacy_cache") else "")
 

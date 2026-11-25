@@ -208,6 +208,32 @@ def build(library: Path, target: str, out: str, stage: str) -> None:
 
 
 @main.command()
+@click.argument("target")
+@click.option("--dry-run", is_flag=True, help="build and check everything, push nothing")
+@click.option("--yes", "-y", is_flag=True, help="do not ask before replacing the live site")
+@click.option("--no-build", is_flag=True, help="publish the site already built in --out instead of building it first")
+@click.option("--out", "-o", default="", help="the site folder (default: <book>/dist)")
+@click.option("--message", "-m", default="", help="the commit message")
+@click.pass_obj
+@_guard
+def publish(library: Path, target: str, dry_run: bool, yes: bool, no_build: bool, out: str, message: str) -> None:
+    """Build a book's site and push it to book.yaml's `publish:` target (GitHub Pages: the gh-pages branch), as one fresh
+    commit that replaces the branch. A policy (recipes/publish/policies/publish.cedar) refuses the push unless the site is
+    built, the remote is reachable, the branch is not the remote's default and the base path matches where it is served."""
+    from .build import build_site, site_base
+    from .publish import publish_site, remote_of
+    book = load_book(_find_book(target, library))
+    remote, branch = remote_of(book), str(book.publish.get("branch") or "gh-pages")
+    site = Path(out).expanduser() if out else book.root / "dist"
+    if not no_build:
+        build_site(book, site, log=lambda m: click.echo(m, err=True))
+    if not dry_run and not yes:
+        click.confirm(f"Replace {remote} {branch} with {site} (served at {site_base(book)})?", abort=True)
+    res = publish_site(book, site, dry_run=dry_run, message=message)
+    click.echo(res["summary"])
+
+
+@main.command()
 @click.argument("repo", type=click.Path(exists=True, file_okay=False))
 @click.option("--press", default="digital-duck", show_default=True)
 @click.option("--book", "slug", default="", help="the book slug (default: the repo name without `cb-`)")

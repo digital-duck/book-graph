@@ -1,0 +1,6 @@
+# Error codes of the publish recipe.
+errors:
+  - code: E_PUBLISH_REFUSED
+    description: the publish policy refused this site, remote, branch or base path
+    cause: the site is not built, the remote is unknown or unreachable, the branch is the remote's default (or main/master), or site.base does not match where the site will be served
+    remedy: run `bookgraph build`; set publish.repo (or publish.remote) and publish.branch in book.yaml; set site.base to the path in the message and rebuild

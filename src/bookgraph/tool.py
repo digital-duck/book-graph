@@ -4,7 +4,10 @@ from __future__ import annotations
 import json
 import sys
 
-from .steps import STEPS
+from .publish import STEPS as _PUBLISH_STEPS
+from .steps import STEPS as _STEPS
+
+STEPS = {**_STEPS, **_PUBLISH_STEPS}
 
 
 def main(argv: list[str] | None = None) -> int:
