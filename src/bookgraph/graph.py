@@ -87,9 +87,15 @@ class ChapterGraph:
             text += f" [Diagram: {d.get('type', 'auto')} — {d.get('hint', '')}]"
         return text
 
+    def _order(self, G: nx.DiGraph, weight: float, **kw: Any) -> list[str]:
+        try:
+            return za.productivity_order(G, weight, weighted_applications=True, **kw)
+        except CycleError as e:
+            raise BookError(f"{self.path}: {e}") from e
+
     def default_target(self) -> str:
         """The last application in teaching order, else the last node."""
-        order = za.productivity_order(self.G, 1.0, weighted_applications=True)
+        order = self._order(self.G, 1.0)
         apps = [n for n in order if self.kind(n) == "application"]
         return (apps or order)[-1]
 
@@ -98,8 +104,7 @@ class ChapterGraph:
         if target not in self.G or "kind" not in self.G.nodes[target]:
             raise BookError(f"{self.path}: target {target!r} is not a node of this graph")
         needed = nx.ancestors(self.G, target) | {target}
-        return za.productivity_order(za.restrict(self.G, needed), payoff_weight, weighted_applications=True,
-                                     seed_by_reach=True, include_primitives=True)
+        return self._order(za.restrict(self.G, needed), payoff_weight, seed_by_reach=True, include_primitives=True)
 
     def applications_of(self, target: str) -> list[str]:
         return za.applications_of(self.G, target)
@@ -107,10 +112,20 @@ class ChapterGraph:
     def prerequisites(self, node_id: str) -> list[str]:
         return sorted(self.G.predecessors(node_id))
 
-    def new_primitives(self, text: str) -> int:
-        """How many primitive names a section mentions (the primitive-budget check)."""
+    def new_primitives(self, text: str, node: str = "", lang: str = "en") -> list[str]:
+        """The primitives a section introduces: those it names (by id or by label in `lang`) that are neither the node itself
+        nor one of its ancestors: every ancestor comes earlier in the teaching order, so the reader has already met it. Whole words for Latin-script names; a
+        plain substring for others (CJK has no word boundaries)."""
+        skip = {node} | (nx.ancestors(self.G, node) if node in self.G else set())
         low = text.lower()
-        return sum(1 for p in self.primitives() if p.replace("_", " ") in low or p in low)
+        found = []
+        for p in self.primitives():
+            if p in skip:
+                continue
+            names = {p.replace("_", " ").lower(), p.lower(), self.label(p, lang).lower()}
+            if any((re.search(r"(?<![\w])" + re.escape(n) + r"(?![\w])", low) if n.isascii() else n in low) for n in names if n):
+                found.append(p)
+        return found
 
     def validate(self) -> list[str]:
         """Hard problems, as messages; empty when the graph can be generated from."""
@@ -125,8 +140,12 @@ class ChapterGraph:
             problems.append(f"named as a prerequisite but never declared: {', '.join(undeclared)}")
         elif not za.reducible(self.G, self.primitives(), rule="declared"):
             problems.append("some concepts do not reduce to primitives")
+        seen: dict[str, str] = {}
         for section in SECTIONS:
             for nid, attrs in (self.data.get(section) or {}).items():
+                if nid in seen:
+                    problems.append(f"{nid!r} is declared in both {seen[nid]} and {section}")
+                seen.setdefault(nid, section)
                 if not (attrs or {}).get("defines"):
                     problems.append(f"{section[:-1]} {nid!r} has no 'defines' text")
         return problems
@@ -144,20 +163,27 @@ def load_graph(path: str | Path) -> ChapterGraph:
         raise BookError(f"{p}: not a ConceptBook graph (needs primitives:, concepts: or applications:)")
     G = nx.DiGraph()
     for section in SECTIONS:
+        if not isinstance(data.get(section) or {}, dict):
+            raise BookError(f"{p}: '{section}' must be a mapping of node id to its attributes")
         for nid, attrs in (data.get(section) or {}).items():
             attrs = attrs or {}
+            if not isinstance(attrs, dict):
+                raise BookError(f"{p}: {section[:-1]} {nid!r} must be a mapping")
             edge_key = _EDGE_KEY[section]
-            deps = list(attrs.get(edge_key) or []) if edge_key else []
+            deps = attrs.get(edge_key) or [] if edge_key else []
+            if not isinstance(deps, list):
+                raise BookError(f"{p}: {nid!r}: '{edge_key}' must be a list of node ids, not {type(deps).__name__}")
             G.add_node(nid, kind=_KIND[section], composed_of=deps)
             for d in deps:
                 G.add_edge(d, nid)
     return ChapterGraph(path=p, data=data, G=G)
 
 
-def section_params(language: str, style: str, model: str, context: str) -> str:
-    """The section cache's key parameters. All four matter: the language, the style (level), the model, and a hash of the
-    node's `defines` so editing a definition (or re-declaring the node elsewhere with another one) invalidates the entry."""
-    return json.dumps({"language": language, "style": style, "model": model,
+def section_params(language: str, style: str, model: str, context: str, salt: str = "") -> str:
+    """The section cache's key parameters: the language, the style (level), the model (the full `adapter:model`), a hash of
+    everything about the node that reaches the prompt (its label and `defines`), and `salt` — a hash of the prompt files, the
+    style guide and the primitive budget (steps.cache_salt). Editing any of them invalidates the entry."""
+    return json.dumps({"language": language, "style": style, "model": model, "salt": salt,
                        "ctx": hashlib.sha256((context or "").encode("utf-8")).hexdigest()[:16]}, sort_keys=True, ensure_ascii=False)
 
 
@@ -167,5 +193,5 @@ def retitle_heading(section: str, node_id: str, label: str, has_label: bool) -> 
     When the graph names the node in that language the heading is replaced whatever the model wrote; otherwise only a bare
     node-id heading is (a model's own translated heading on a non-English page stays)."""
     if has_label:
-        return re.sub(r"\A\s*##[ \t]+[^\n]*", f"## {label}", section, count=1)
-    return re.sub(r"^##\s+" + re.escape(node_id) + r"[ \t]*$", f"## {label}", section, count=1, flags=re.MULTILINE)
+        return re.sub(r"\A\s*##[ \t]+[^\n]*", lambda _m: f"## {label}", section, count=1)
+    return re.sub(r"^##\s+" + re.escape(node_id) + r"[ \t]*$", lambda _m: f"## {label}", section, count=1, flags=re.MULTILINE)

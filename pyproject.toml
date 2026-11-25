@@ -14,7 +14,7 @@ dependencies = [
     "pyyaml>=6.0",
     "click>=8.1",
     "zinet>=0.2.0",           # the graph algorithms (order, reducibility) shared with GraphLang, app-graph and work-graph
-    "graflang>=0.1.0",        # the recipes run on the GraphLang runtime (package `graphlang`)
+    "graflang>=0.3.0,<0.4",   # the recipes run on the GraphLang runtime (package `graphlang`)
     "dd-llm>=0.2.0",          # the LLM adapters, shared with GraphLang, app-graph and work-graph
 ]
 classifiers = [

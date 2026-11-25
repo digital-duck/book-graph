@@ -27,8 +27,6 @@ qualitative idea; state such ideas in words. Every equation must be complete,
 valid LaTeX: balanced braces, and every fraction written as \frac{...}{...}.
 Refer to concepts by their natural-language names in {{in_language_label}}; never write
 identifiers containing underscores in the prose.
-Refer to concepts by their natural-language names in {{in_language_label}}; never write
-identifiers containing underscores in the prose.
 If the context includes a [Diagram: type — hint], generate a diagram
 immediately after the main explanation (before any closing summary). Choose
 whichever option better serves the hint:

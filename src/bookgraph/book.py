@@ -9,11 +9,13 @@
     models: [claude_cli:claude-sonnet-5-5]       # an adapter:model string; its file-name form is the part after ':'
     tags: [math]
     site: {base: /cb-linalg/, brand: {}}                                  # optional, read by the web build
+    legacy_cache: ../cb-linalg/spl/.spl          # optional: the SPL app's spl3 cache, read (never written) so its sections are reused
     chapters:
       - {id: ch01, title: Systems of equations, graph: chapters/ch01/graph.yaml, capstone: gaussian_elimination}
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -47,6 +49,7 @@ class Book:
     source: dict[str, Any] = field(default_factory=dict)
     site: dict[str, Any] = field(default_factory=dict)
     root: Path = field(default_factory=Path)          # the folder holding book.yaml
+    legacy_cache: str = ""                            # absolute path of an SPL app's `spl/.spl` cache folder (bookgraph.legacy), or ""
 
     def chapter(self, chapter_id: str) -> Chapter:
         for c in self.chapters:
@@ -98,12 +101,16 @@ def load_book(path: str | Path) -> Book:
     return Book(press=press, book=slug, title=str(raw.get("title") or slug), chapters=chapters, levels=levels,
                 languages=[str(x) for x in raw.get("languages") or ["en"]], models=[str(x) for x in raw.get("models") or []],
                 tags=[str(x) for x in raw.get("tags") or []], source=dict(raw.get("source") or {}), site=dict(raw.get("site") or {}),
-                root=p.parent.resolve())
+                root=p.parent.resolve(),
+                legacy_cache=str((p.parent / str(raw["legacy_cache"])).expanduser().resolve()) if raw.get("legacy_cache") else "")
 
 
 def model_dir_name(model: str) -> str:
-    """`claude_cli:claude-sonnet-5-5` -> `claude-sonnet-5-5` (the folder a model's pages live in); "" stays ""."""
-    return model.split(":", 1)[1] if ":" in model else model
+    """The folder a model's pages live in: the model part of `ADAPTER:MODEL` made path-safe (anything but letters, digits, `_`
+    and `-` becomes `-`), so `ollama:qwen2.5:7b` -> `qwen2-5-7b`; "" stays "". The folder drops the adapter to keep the names
+    the existing apps use (`output/core.en/sonnet/html`); the cache key carries the whole `ADAPTER:MODEL` string."""
+    part = model.split(":", 1)[1] if ":" in model else model
+    return re.sub(r"[^A-Za-z0-9_-]+", "-", part).strip("-_")
 
 
 NEW_BOOK = """\

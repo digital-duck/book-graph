@@ -2,7 +2,7 @@
 
 Each profile defines HOW verified content is written — tone, depth, audience,
 structure — without changing WHAT is true.  The symbolic check
-(graph_lib.verify_content) is style-agnostic; only the prose adapts.
+(the symbolic check, not ported to book-graph yet) is style-agnostic; only the prose adapts.
 
 A profile is resolved to a style_guide string by style_instruction(), which is
 used by the generate_chapter recipe and injected into every GENERATE prompt.

@@ -30,10 +30,17 @@ def _locked(lock: Path) -> Iterator[None]:
 
 
 def read_catalog(library: Path) -> dict[str, Any]:
+    f = Path(library) / "catalog.json"
     try:
-        return json.loads((Path(library) / "catalog.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        text = f.read_text(encoding="utf-8")
+    except FileNotFoundError:
         return {"presses": []}
+    except OSError as e:
+        raise BookError(f"cannot read {f}: {e}") from e
+    try:
+        return json.loads(text)
+    except ValueError as e:                       # never treat a damaged catalog as empty: the next write would drop every other book
+        raise BookError(f"{f} is not valid JSON ({e}); fix or delete it, then run `bookgraph catalog` to rebuild it") from e
 
 
 def update_catalog(library: Path, fn: Callable[[dict[str, Any]], dict[str, Any] | None]) -> dict[str, Any]:
@@ -110,6 +117,8 @@ def scan_library(library: Path) -> dict[str, Any]:
             safe_segment(f.parent.parent.name, "press")
             book = load_book(f)
         except BookError:
+            continue
+        if (book.press, book.book) != (f.parent.parent.name, f.parent.name):      # `press/book` must find it again
             continue
         press = next((p for p in cat["presses"] if p["press"] == book.press), None)
         if press is None:

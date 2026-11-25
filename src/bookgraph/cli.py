@@ -20,14 +20,27 @@ def _library(ctx_value: str | None) -> Path:
     return Path(ctx_value).expanduser() if ctx_value else default_library()
 
 
+def _is_segment(value: str) -> bool:
+    try:
+        safe_segment(value)
+        return True
+    except BookError:
+        return False
+
+
 def _find_book(target: str, library: Path) -> Path:
     """TARGET is a book.yaml, a book folder, or `press/book` (resolved under the library)."""
     p = Path(target).expanduser()
+    explicit = p.is_absolute() or target.startswith((".", "~")) or p.is_file()      # `./acme/demo` and files mean the path
+    if explicit and p.exists():
+        return p
+    press, _, book = target.partition("/")
+    if "/" in target and not explicit and _is_segment(press) and _is_segment(book):
+        in_library = library / press / book
+        if in_library.exists() or not p.exists():                                  # the library wins over a folder of that name here
+            return in_library
     if p.exists():
         return p
-    if "/" in target:
-        press, _, book = target.partition("/")
-        return library / safe_segment(press, "press") / safe_segment(book, "book")
     raise BookError(f"no book at {target!r} (give a book.yaml, a folder, or press/book under {library})")
 
 
@@ -114,17 +127,22 @@ def order(graph: str, target: str, payoff_weight: float) -> None:
 @click.option("--llm", "models", multiple=True, help="ADAPTER:MODEL (repeatable; default: the book's models)")
 @click.option("--target-node", "node", default="", help="write toward this node instead of the chapter's capstone")
 @click.option("--skip-cache", is_flag=True, help="regenerate every section")
-@click.option("--max-llm-calls", type=int, default=200, show_default=True)
+@click.option("--max-llm-calls", type=int, default=200, show_default=True,
+              help="the cap for EACH chapter x level x language x model run, not for the whole book")
 @click.pass_obj
 @_guard
 def generate(library: Path, target: str, chapters, levels, languages, models, node: str, skip_cache: bool, max_llm_calls: int) -> None:
     """Generate a book's pages (book.yaml, folder or press/book): every chapter x level x language x model, or the subset asked."""
     book = load_book(_find_book(target, library))
+    if node and not chapters:
+        raise click.UsageError("--target-node names a node of one chapter: also give -c CHAPTER")
     res = generate_book(book, library, chapters=list(chapters) or None, levels=list(levels) or None, languages=list(languages) or None,
                         models=list(models) or None, target=node, skip_cache=skip_cache, max_llm_calls=max_llm_calls)
     for c in res.chapters:
         tail = c.book if c.ok else f"FAILED: {c.error}"
         click.echo(f"{'ok  ' if c.ok else 'FAIL'} {c.chapter} {c.level}.{c.language} {c.model} ({c.llm_calls} model calls) {tail}")
+    if res.catalog_error:
+        click.echo(f"catalog not updated: {res.catalog_error}", err=True)
     if not res.ok:
         sys.exit(1)
 
@@ -142,6 +160,7 @@ def catalog(library: Path, target: str | None) -> None:
 
 @main.command(name="list")
 @click.pass_obj
+@_guard
 def list_(library: Path) -> None:
     """List the presses, books and chapters of the library's catalog."""
     from .catalog import read_catalog

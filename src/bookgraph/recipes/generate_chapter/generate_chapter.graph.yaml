@@ -23,6 +23,9 @@ workflow:
     - {name: skip_cache, type: BOOL, default: false}
     - {name: primitive_budget, type: INTEGER, default: 2}
     - {name: payoff_weight, type: FLOAT, default: 1.5}
+    - {name: subject, type: TEXT, default: "", description: "the book's slug (and tags): decides how much formalism the style guide asks for"}
+    - {name: write_roots, type: TEXT, default: "", description: "extra folders (os.pathsep-separated) the policy lets output_dir and cache_dir be under, besides home and the temporary folder; a step cannot read the caller's environment, so the caller passes BOOKGRAPH_WRITE_ROOTS here"}
+    - {name: legacy_cache, type: TEXT, default: "", description: "absolute path of an SPL app's spl/.spl cache folder; read-only: a section found there is reused (bookgraph.legacy)"}
   outputs:
     - {name: book, type: TEXT, description: "path of the book index page"}
     - {name: manifest, type: TEXT, description: "one line per section: generated or cache, and the page written"}
@@ -39,8 +42,8 @@ resources:
 steps:
   - prepare:
       node: SOLVE
-      in: {chapter_graph: $in.chapter_graph, target: $in.target, style: $in.style, language: $in.language, payoff_weight: $in.payoff_weight, output_dir: $in.output_dir, cache_dir: $in.cache_dir}
-      ports: [trigger, complete, in_chapter_graph, in_target, in_style, in_language, in_payoff_weight, in_output_dir, in_cache_dir, out_plan]
+      in: {chapter_graph: $in.chapter_graph, target: $in.target, style: $in.style, language: $in.language, payoff_weight: $in.payoff_weight, output_dir: $in.output_dir, cache_dir: $in.cache_dir, subject: $in.subject, primitive_budget: $in.primitive_budget, write_roots: $in.write_roots}
+      ports: [trigger, complete, in_chapter_graph, in_target, in_style, in_language, in_payoff_weight, in_output_dir, in_cache_dir, in_subject, in_primitive_budget, in_write_roots, out_plan]
       out: plan
       backend: subprocess
       command: ["python3", "-I", "-m", "bookgraph.tool", "prepare"]
@@ -51,9 +54,10 @@ steps:
   - guide:    {solve: "json_get(@in_plan, 'style_guide')", on: n, in: {plan: prepare.plan}, out: guide}
   - lang:     {solve: "json_get(@in_plan, 'language_label')", on: guide, in: {plan: prepare.plan}, out: lang}
   - target:   {solve: "json_get(@in_plan, 'target')", on: lang, in: {plan: prepare.plan}, out: target}
+  - salt:     {solve: "json_get(@in_plan, 'key_salt')", on: target, in: {plan: prepare.plan}, out: key_salt}
   - allowed:
       guard: policies.generate
-      on: target
+      on: salt
       principal: 'Service::"book-graph"'
       action: 'Action::"generate_chapter"'
       resource: 'Folder::"output"'
@@ -68,14 +72,14 @@ steps:
       on: allowed.allow
       while: "@node_index < @in_n"
       index: node_index
-      in: {chapter_graph: $in.chapter_graph, target: target.target, style: $in.style, language: $in.language, model: $in.model, payoff_weight: $in.payoff_weight, skip_cache: $in.skip_cache, cache_dir: $in.cache_dir, output_dir: $in.output_dir, chapter_title: $in.chapter_title, level: $in.level, primitive_budget: $in.primitive_budget, style_guide: guide.guide, language_label: lang.lang, n: n.n}
+      in: {chapter_graph: $in.chapter_graph, target: target.target, style: $in.style, language: $in.language, model: $in.model, payoff_weight: $in.payoff_weight, skip_cache: $in.skip_cache, cache_dir: $in.cache_dir, output_dir: $in.output_dir, chapter_title: $in.chapter_title, level: $in.level, primitive_budget: $in.primitive_budget, key_salt: salt.key_salt, legacy_cache: $in.legacy_cache, style_guide: guide.guide, language_label: lang.lang, n: n.n}
       state:
         manifest: {from: line.manifest, init: ""}
       steps:
         - round:
             node: SOLVE
-            in: {chapter_graph: $loop.chapter_graph, target: $loop.target, style: $loop.style, language: $loop.language, model: $loop.model, payoff_weight: $loop.payoff_weight, skip_cache: $loop.skip_cache, cache_dir: $loop.cache_dir, node_index: $loop.node_index}
-            ports: [trigger, complete, in_chapter_graph, in_target, in_style, in_language, in_model, in_payoff_weight, in_skip_cache, in_cache_dir, in_node_index, out_round]
+            in: {chapter_graph: $loop.chapter_graph, target: $loop.target, style: $loop.style, language: $loop.language, model: $loop.model, payoff_weight: $loop.payoff_weight, skip_cache: $loop.skip_cache, cache_dir: $loop.cache_dir, key_salt: $loop.key_salt, legacy_cache: $loop.legacy_cache, node_index: $loop.node_index}
+            ports: [trigger, complete, in_chapter_graph, in_target, in_style, in_language, in_model, in_payoff_weight, in_skip_cache, in_cache_dir, in_key_salt, in_legacy_cache, in_node_index, out_round]
             out: round
             backend: subprocess
             command: ["python3", "-I", "-m", "bookgraph.tool", "round"]
@@ -90,8 +94,8 @@ steps:
         - write:    {generate: prompts.write_section, on: hit.fail, in: {concept: which.node, label: label.label, context: context.context, style_guide: $loop.style_guide, language_label: $loop.language_label}, out: section, label: Write the section}
         - check:
             node: SOLVE
-            in: {chapter_graph: $loop.chapter_graph, section: write.section, primitive_budget: $loop.primitive_budget}
-            ports: [trigger, complete, in_chapter_graph, in_section, in_primitive_budget, out_check]
+            in: {chapter_graph: $loop.chapter_graph, section: write.section, primitive_budget: $loop.primitive_budget, node: which.node, language: $loop.language}
+            ports: [trigger, complete, in_chapter_graph, in_section, in_primitive_budget, in_node, in_language, out_check]
             out: check
             backend: subprocess
             command: ["python3", "-I", "-m", "bookgraph.tool", "check"]
@@ -104,8 +108,8 @@ steps:
         - final:    {solve: "@in_section", on: [cached, ok.pass, refine], in: {section: [cached, write, refine]}, out: section}
         - store:
             node: SOLVE
-            in: {chapter_graph: $loop.chapter_graph, target: $loop.target, style: $loop.style, language: $loop.language, model: $loop.model, payoff_weight: $loop.payoff_weight, cache_dir: $loop.cache_dir, output_dir: $loop.output_dir, chapter_title: $loop.chapter_title, level: $loop.level, round: round.round, section: final.section, manifest: $loop.manifest}
-            ports: [trigger, complete, in_chapter_graph, in_target, in_style, in_language, in_model, in_payoff_weight, in_cache_dir, in_output_dir, in_chapter_title, in_level, in_round, in_section, in_manifest, out_stored]
+            in: {chapter_graph: $loop.chapter_graph, target: $loop.target, style: $loop.style, language: $loop.language, model: $loop.model, payoff_weight: $loop.payoff_weight, cache_dir: $loop.cache_dir, key_salt: $loop.key_salt, output_dir: $loop.output_dir, chapter_title: $loop.chapter_title, level: $loop.level, round: round.round, section: final.section, manifest: $loop.manifest}
+            ports: [trigger, complete, in_chapter_graph, in_target, in_style, in_language, in_model, in_payoff_weight, in_cache_dir, in_key_salt, in_output_dir, in_chapter_title, in_level, in_round, in_section, in_manifest, out_stored]
             out: stored
             backend: subprocess
             command: ["python3", "-I", "-m", "bookgraph.tool", "store"]
@@ -119,8 +123,8 @@ steps:
   - payoff_round:
       node: SOLVE
       on: sections
-      in: {chapter_graph: $in.chapter_graph, target: target.target, style: $in.style, language: $in.language, model: $in.model, payoff_weight: $in.payoff_weight, skip_cache: $in.skip_cache, cache_dir: $in.cache_dir}
-      ports: [trigger, complete, in_chapter_graph, in_target, in_style, in_language, in_model, in_payoff_weight, in_skip_cache, in_cache_dir, out_round]
+      in: {chapter_graph: $in.chapter_graph, target: target.target, style: $in.style, language: $in.language, model: $in.model, payoff_weight: $in.payoff_weight, skip_cache: $in.skip_cache, cache_dir: $in.cache_dir, key_salt: salt.key_salt, legacy_cache: $in.legacy_cache}
+      ports: [trigger, complete, in_chapter_graph, in_target, in_style, in_language, in_model, in_payoff_weight, in_skip_cache, in_cache_dir, in_key_salt, in_legacy_cache, out_round]
       out: round
       backend: subprocess
       command: ["python3", "-I", "-m", "bookgraph.tool", "payoff_round"]
@@ -136,12 +140,12 @@ steps:
   - p_pre:    {solve: "json_get(@in_round, 'prereqs')", on: p_ctx, in: {round: payoff_round.round}, out: v}
   - p_apps:   {solve: "json_get(@in_round, 'apps')", on: p_pre, in: {round: payoff_round.round}, out: v}
   - p_write:  {generate: prompts.write_payoff, on: p_apps, in: {target: p_label.v, target_context: p_ctx.v, prerequisites: p_pre.v, applications: p_apps.v, style_guide: guide.guide, language_label: lang.lang}, out: payoff, label: Write the payoff}
-  - p_final:  {solve: "@in_payoff", on: [none, p_cached, p_write], in: {payoff: [none, p_cached, p_write]}, out: payoff}
+  # a fresh payoff is cached BEFORE the one join below, so each of `p_final` and `index` fires exactly once
   - p_store:
       node: SOLVE
       on: p_write
-      in: {chapter_graph: $in.chapter_graph, target: target.target, style: $in.style, language: $in.language, model: $in.model, payoff_weight: $in.payoff_weight, cache_dir: $in.cache_dir, round: payoff_round.round, payoff: p_write.payoff}
-      ports: [trigger, complete, in_chapter_graph, in_target, in_style, in_language, in_model, in_payoff_weight, in_cache_dir, in_round, in_payoff, out_stored]
+      in: {chapter_graph: $in.chapter_graph, target: target.target, style: $in.style, language: $in.language, model: $in.model, payoff_weight: $in.payoff_weight, cache_dir: $in.cache_dir, key_salt: salt.key_salt, round: payoff_round.round, payoff: p_write.payoff}
+      ports: [trigger, complete, in_chapter_graph, in_target, in_style, in_language, in_model, in_payoff_weight, in_cache_dir, in_key_salt, in_round, in_payoff, out_stored]
       out: stored
       backend: subprocess
       command: ["python3", "-I", "-m", "bookgraph.tool", "payoff_store"]
@@ -149,11 +153,13 @@ steps:
       timeout: 60
       risky: true
       label: Cache the payoff
+  - p_stored: {solve: "json_get(@in_stored, 'payoff')", in: {stored: p_store.stored}, out: payoff}
+  - p_final:  {solve: "@in_payoff", on: [none, p_cached, p_stored], in: {payoff: [none, p_cached, p_stored]}, out: payoff}
 
   # 5. the book index
   - index:
       node: SOLVE
-      on: [p_final, p_store]
+      on: p_final
       in: {chapter_graph: $in.chapter_graph, target: target.target, style: $in.style, language: $in.language, model: $in.model, payoff_weight: $in.payoff_weight, output_dir: $in.output_dir, chapter_title: $in.chapter_title, level: $in.level, payoff: p_final.payoff}
       ports: [trigger, complete, in_chapter_graph, in_target, in_style, in_language, in_model, in_payoff_weight, in_output_dir, in_chapter_title, in_level, in_payoff, out_book]
       out: book

@@ -56,7 +56,8 @@ def write_book_index(g: ChapterGraph, order: list[str], target: str, payoff: str
         cls = ' class="toc-target"' if node == target else ""
         items.append(f'<li{cls}><a href="concept_{node}{suffix}.html">{_esc(g.label(node, lang))}</a></li>')
     toc = "<ol>\n" + "\n".join(items) + "\n</ol>"
-    payoff = re.sub(r"\A\s*##[ \t]+Payoff\b[^\n]*", f"## {_ui('payoff', lang)}", payoff)
+    heading = f"## {_ui('payoff', lang)}"
+    payoff = re.sub(r"\A\s*##[ \t]+Payoff\b[^\n]*", lambda _m: heading, payoff)
     payoff_html = f"<section>\n      {_md_to_html(payoff)}\n    </section>" if payoff.strip() else ""
     html = fill(_BOOK_INDEX_TEMPLATE, lang_attr=_lang_attr(lang), domain_title=_esc(title), target_title=_esc(g.label(target, lang)),
                 book_label=_esc(_ui("book", lang)), contents_label=_esc(_ui("contents", lang)), toc=toc, payoff=payoff_html,

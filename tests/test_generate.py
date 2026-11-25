@@ -54,10 +54,12 @@ def test_language_is_its_own_cache_slot_and_suffix(library, tmp_path):
 
 def test_primitive_budget_triggers_one_refinement(library, tmp_path):
     llm = Scripted(over_budget=True)
-    _, res = run(library, llm, tmp_path, primitive_budget=1)
+    _, res = run(library, llm, tmp_path, primitive_budget=0)
     assert res.ok
-    assert sum("Revise the section below" in p for p in llm.prompts) == 5       # every section names 2 primitives, budget 1
-    assert res.llm_calls == 11                                                  # 5 written + 5 refined + the payoff
+    # a node's ancestors do not count (they were taught earlier): only the two primitive sections, `idea` and `quantity`,
+    # name a primitive that is not theirs (each names the other: 1 > budget 0)
+    assert sum("Revise the section below" in p for p in llm.prompts) == 2
+    assert res.llm_calls == 8                                                   # 5 written + 2 refined + the payoff
 
 
 def test_non_application_target_has_no_payoff(library, tmp_path):

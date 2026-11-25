@@ -24,11 +24,12 @@ bgr --help
 ## Rules that bit (GraphLang)
 
 A `$loop.X` must be read under the same name `X` (so the loop input is `style_guide`, and the prompt's input is `style_guide`/`language_label`);
-a SOLVE subprocess runs with only `PATH`/`PYTHONUTF8`, so pass absolute paths; `on: [a, b]` fires once per arriving token (exclusive branches only);
-a `risky: true` step is reachable only through a GUARD's `allow`. Every step that writes files is `risky: true` behind the `write_ok` policy; keep it so.
+a SOLVE subprocess runs with only `PATH`/`PYTHONUTF8`, so pass absolute paths;
+a `risky: true` step is reachable only through a GUARD's `allow`; a step cannot read the caller's environment, so anything it needs (`BOOKGRAPH_WRITE_ROOTS`) is passed in as a recipe input by `builder.py`; `on: [a, b]` joins fire once per token, so a step that must run once is fed by ONE upstream step (the payoff is cached *before* `p_final`). Every step that writes files is `risky: true` behind the `write_ok` policy; keep it so.
 
 ## Known gaps vs. the SPL workflow
 
 - The symbolic `verify_section` (sympy/z3 per domain) is not ported; only the primitive-budget check runs.
-- The section cache has its own key scheme; the old spl3 cache is not read.
+- The section cache has its own key scheme (language, style, full `adapter:model`, a hash of label+defines, and a salt over the prompt files, style guide and budget). An SPL app's spl3 cache is read, never written, through `legacy.py` when `book.yaml` sets `legacy_cache:`; a section hit is copied into `.bg_cache`, and a payoff hit is read again on each run.
+- Model output is untrusted: `render.py` escapes all text, mermaid and display math, and passes only one exact `<figure>` shape. Keep it so when touching the converter.
 - Not built yet: ingestion/extraction (from concept-book-press), the web app, `publish`, `migrate`.

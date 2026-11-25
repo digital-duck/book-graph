@@ -1,7 +1,8 @@
 """HTML rendering: Markdown (with $LaTeX$ and mermaid) to a concept page and a chapter's book index.
 
 The converter and the page templates are the concept-book apps' own (spl/tools.py), kept as they were so existing
-generated pages and new ones look alike. Only the credit line changed (SPL -> book-graph).
+generated pages and new ones look alike. Only the credit line changed (SPL -> book-graph); the footer keeps the old `spl-credit` class next to `bg-credit`, because
+conceptbook-app strips `.spl-credit` before extracting page text (ContentPanel.js).
 """
 from __future__ import annotations
 
@@ -11,11 +12,25 @@ def _esc(text: str) -> str:
     return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
 
+# The one raw-HTML block a section may carry: a diagram "Option B" figure from a public-domain host (see write_section.md).
+_FIGURE_OK = re.compile(
+    r'\A<figure class="cb-figure">\s*'
+    r'<img src="https://(?:[\w-]+\.)*(?:wikimedia\.org|openstax\.org|rcsb\.org|nlm\.nih\.gov)/[^"\s<>]*" alt="[^"<>]*" class="cb-figure-img">\s*'
+    r'<figcaption>[^<]*(?:<a href="https?://[^"\s<>]+">[^<]*</a>[^<]*)?</figcaption>\s*</figure>\Z')
+
+
+def _safe_figure(block: str) -> str:
+    """The figure as written when it matches the one allowed shape, else the same text escaped (model output is untrusted)."""
+    return block if _FIGURE_OK.match(block.strip()) else f'<p>{_esc(block)}</p>'
+
+
 def _inline_md(text: str) -> str:
-    """Bold, italic, backtick-code.  Leaves $ LaTeX delimiters untouched."""
+    """Bold, italic, backtick-code.  The text is HTML-escaped first; `$` LaTeX delimiters are left alone (MathJax reads the
+    decoded text)."""
+    text = _esc(text)
     text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
     text = re.sub(r'\*(.+?)\*', r'<em>\1</em>', text)
-    text = re.sub(r'`([^`]+)`', lambda m: f'<code>{_esc(m.group(1))}</code>', text)
+    text = re.sub(r'`([^`]+)`', lambda m: f'<code>{m.group(1)}</code>', text)
     return text
 
 
@@ -41,17 +56,23 @@ def _md_to_html(md: str) -> str:
 
     for line in lines:
         # ── raw HTML passthrough (cb-figure blocks from diagram Option B) ─────
-        # Only <figure class="cb-figure"> is passed through unescaped; all other
-        # HTML is still escaped by _inline_md for XSS safety.
+        # Only a <figure class="cb-figure"> of the exact shape in _FIGURE_OK is passed through; any other HTML is escaped.
         if not in_raw_html and line.startswith('<figure'):
             flush_para()
             in_raw_html = True
             raw_html_buf = [line]
             continue
         if in_raw_html:
+            if not line.strip():
+                # an unterminated figure ends at the first blank line (it is escaped, since it cannot match _FIGURE_OK),
+                # so the rest of the section is still rendered instead of being swallowed
+                out.append(_safe_figure('\n'.join(raw_html_buf)))
+                raw_html_buf.clear()
+                in_raw_html = False
+                continue
             raw_html_buf.append(line)
             if '</figure>' in line:
-                out.append('\n'.join(raw_html_buf))
+                out.append(_safe_figure('\n'.join(raw_html_buf)))
                 raw_html_buf.clear()
                 in_raw_html = False
             continue
@@ -60,8 +81,9 @@ def _md_to_html(md: str) -> str:
         if line.startswith('```'):
             if in_code:
                 if code_lang == 'mermaid':
-                    # Preserve unescaped so mermaid.js can parse the diagram.
-                    out.append(f'<pre class="mermaid">{chr(10).join(code_buf)}</pre>')
+                    # Only `&` and `<` are escaped (mermaid.js reads the decoded text; `-->` keeps its `>`), so a `</pre>` cannot break out.
+                    body = chr(10).join(code_buf).replace('&', '&amp;').replace('<', '&lt;')
+                    out.append(f'<pre class="mermaid">{body}</pre>')
                 else:
                     out.append(f'<pre><code>{_esc(chr(10).join(code_buf))}</code></pre>')
                 code_buf.clear()
@@ -84,11 +106,11 @@ def _md_to_html(md: str) -> str:
             # Self-contained: $$ ... $$ on one line (content between the delimiters)
             if stripped != '$$' and stripped.endswith('$$') and len(stripped) > 4:
                 flush_para()
-                out.append(line)
+                out.append(_esc(line))
                 continue
             # Toggle multi-line block
             if in_dmath:
-                out.append('$$\n' + '\n'.join(math_buf) + '\n$$')
+                out.append('$$\n' + _esc('\n'.join(math_buf)) + '\n$$')
                 math_buf.clear()
                 in_dmath = False
             else:
@@ -130,6 +152,8 @@ def _md_to_html(md: str) -> str:
         para_buf.append(_inline_md(line))
 
     flush_para()
+    if raw_html_buf:                                   # a figure still open at the end of the text
+        out.append(_safe_figure('\n'.join(raw_html_buf)))
     return '\n'.join(out)
 
 
@@ -188,7 +212,7 @@ section:first-of-type{border-top:none;padding-top:0}
   <main>
     {body}
   </main>
-  <footer class="bg-credit"><span class="bg-credit__meta">{footer_meta}</span><span class="bg-credit__powered">Generated by <a href="https://github.com/digital-duck/book-graph" target="_blank" rel="noopener">book-graph</a></span></footer>
+  <footer class="spl-credit bg-credit"><span class="spl-credit__meta bg-credit__meta">{footer_meta}</span><span class="bg-credit__powered">Generated by <a href="https://github.com/digital-duck/book-graph" target="_blank" rel="noopener">book-graph</a></span></footer>
 </div>
 </body>
 </html>"""
@@ -235,7 +259,7 @@ nav.toc{position:relative;height:auto}}
     <section>
       {payoff}
     </section>
-    <footer class="bg-credit"><span class="bg-credit__meta">{footer_meta}</span><span class="bg-credit__powered">Generated by <a href="https://github.com/digital-duck/book-graph" target="_blank" rel="noopener">book-graph</a></span></footer>
+    <footer class="spl-credit bg-credit"><span class="spl-credit__meta bg-credit__meta">{footer_meta}</span><span class="bg-credit__powered">Generated by <a href="https://github.com/digital-duck/book-graph" target="_blank" rel="noopener">book-graph</a></span></footer>
   </main>
 </div>
 </body>
@@ -244,7 +268,6 @@ nav.toc{position:relative;height:auto}}
 
 
 def fill(template: str, **kwargs: str) -> str:
-    """Substitute {key} placeholders; safe with the CSS/JS in the templates, which contain literal braces."""
-    for k, v in kwargs.items():
-        template = template.replace("{" + k + "}", v)
-    return template
+    """Substitute {key} placeholders in one pass, so a value that itself contains `{other_key}` is not substituted into;
+    safe with the CSS/JS in the templates, which contain literal braces."""
+    return re.sub(r"\{(\w+)\}", lambda m: kwargs[m.group(1)] if m.group(1) in kwargs else m.group(0), template)
