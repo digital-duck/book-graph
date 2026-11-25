@@ -19,9 +19,12 @@ def _file(cache_dir: str | Path, key: str, params_json: str) -> Path:
     return Path(cache_dir) / f"{safe}-{digest}.json"
 
 
-def cache_get(cache_dir: str | Path, key: str, params_json: str) -> str | None:
+def cache_get(cache_dir: str | Path, key: str, params_json: str, fresh_after: float = 0.0) -> str | None:
+    """The cached text, or None. With `fresh_after` (a time.time()), an entry written before then is a miss."""
     f = _file(cache_dir, key, params_json)
     try:
+        if fresh_after and f.stat().st_mtime < fresh_after:
+            return None
         return json.loads(f.read_text(encoding="utf-8"))["text"]
     except (OSError, ValueError, KeyError):
         return None

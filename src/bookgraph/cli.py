@@ -126,25 +126,61 @@ def order(graph: str, target: str, payoff_weight: float) -> None:
 @click.option("--lang", "languages", multiple=True, help="only this language (repeatable)")
 @click.option("--llm", "models", multiple=True, help="ADAPTER:MODEL (repeatable; default: the book's models)")
 @click.option("--target-node", "node", default="", help="write toward this node instead of the chapter's capstone")
-@click.option("--skip-cache", is_flag=True, help="regenerate every section")
+@click.option("--skip-cache", is_flag=True, help="regenerate every section (a resumed run keeps what it already regenerated)")
 @click.option("--max-llm-calls", type=int, default=200, show_default=True,
               help="the cap for EACH chapter x level x language x model run, not for the whole book")
+@click.option("--budget", type=int, default=None, help="the cap for the whole run, across resumes (with --resume: raises it)")
+@click.option("--resume", "resume", default=None, metavar="RUN", help="continue a run (its id, or `last`) with its own options")
 @click.pass_obj
 @_guard
-def generate(library: Path, target: str, chapters, levels, languages, models, node: str, skip_cache: bool, max_llm_calls: int) -> None:
-    """Generate a book's pages (book.yaml, folder or press/book): every chapter x level x language x model, or the subset asked."""
+def generate(library: Path, target: str, chapters, levels, languages, models, node: str, skip_cache: bool, max_llm_calls: int,
+             budget, resume) -> None:
+    """Generate a book's pages (book.yaml, folder or press/book): every chapter x level x language x model, or the subset asked,
+    as a resumable run: a run that stops (a failure, a budget, Ctrl-C) continues with --resume last."""
     book = load_book(_find_book(target, library))
-    if node and not chapters:
+    if node and not chapters and not resume:
         raise click.UsageError("--target-node names a node of one chapter: also give -c CHAPTER")
-    res = generate_book(book, library, chapters=list(chapters) or None, levels=list(levels) or None, languages=list(languages) or None,
-                        models=list(models) or None, target=node, skip_cache=skip_cache, max_llm_calls=max_llm_calls)
-    for c in res.chapters:
+    if resume and (chapters or levels or languages or models or node or skip_cache):
+        raise click.UsageError("--resume continues a run with its own selection and options: give none (only --budget, to raise its budget)")
+
+    def line(v, c) -> None:
         tail = c.book if c.ok else f"FAILED: {c.error}"
-        click.echo(f"{'ok  ' if c.ok else 'FAIL'} {c.chapter} {c.level}.{c.language} {c.model} ({c.llm_calls} model calls) {tail}")
+        click.echo(f"{'ok  ' if c.ok else 'FAIL'} {v.key} ({c.llm_calls} model calls) {tail}")
+
+    try:
+        res = generate_book(book, library, chapters=list(chapters) or None, levels=list(levels) or None,
+                            languages=list(languages) or None, models=list(models) or None, target=node, skip_cache=skip_cache,
+                            max_llm_calls=max_llm_calls, budget=budget, resume=resume, on_variant=line)
+    except KeyboardInterrupt:
+        from .runs import load
+        run = load(book, "last")
+        click.echo(f"\ninterrupted: run {run.id} saved; continue with: bookgraph generate {target} --resume {run.id}", err=True)
+        sys.exit(130)
+    run = res.run
+    counts = ", ".join(f"{n} {s}" for s, n in sorted(run.counts().items())) if run else ""
+    click.echo(f"run {res.run_id}: {res.run_status} ({counts}; {run.spent if run else 0} model calls)"
+               + (f": {res.run_reason}" if res.run_reason else ""))
+    if res.run_status != "done":
+        click.echo(f"continue with: bookgraph generate {target} --resume {res.run_id}", err=True)
     if res.catalog_error:
         click.echo(f"catalog not updated: {res.catalog_error}", err=True)
     if not res.ok:
         sys.exit(1)
+
+
+@main.command()
+@click.argument("target")
+@click.pass_obj
+@_guard
+def runs(library: Path, target: str) -> None:
+    """List a book's generate runs (newest last): status, variants done, model calls, and why an incomplete one stopped."""
+    import time as _time
+    from .runs import list_runs
+    book = load_book(_find_book(target, library))
+    for r in list_runs(book):
+        c = r.counts()
+        click.echo(f"{r.id}  {_time.strftime('%Y-%m-%d %H:%M', _time.localtime(r.started))}  {r.status:10} "
+                   f"{c.get('done', 0)}/{len(r.variants)} done  {r.spent} calls" + (f"  {r.reason}" if r.reason else ""))
 
 
 @main.command()

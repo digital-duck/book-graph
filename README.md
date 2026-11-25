@@ -53,7 +53,9 @@ chapters:
 | `bgr new PRESS BOOK` | scaffold a book |
 | `bgr validate TARGET` | a graph.yaml, or every chapter of a book; exit 1 on any problem |
 | `bgr order GRAPH [--target NODE]` | the order sections are written in |
-| `bgr generate TARGET [-c CHAPTER] [--level L] [--lang X] [--llm A:M] [--skip-cache] [--max-llm-calls N]` | run the `generate_chapter` recipe for every chapter x level x language x model |
+| `bgr generate TARGET [-c CHAPTER] [--level L] [--lang X] [--llm A:M] [--skip-cache] [--max-llm-calls N] [--budget N]` | run the `generate_chapter` recipe for every chapter x level x language x model, as a resumable run |
+| `bgr generate TARGET --resume last [--budget N]` | continue a run that stopped (a failure, its budget, Ctrl-C): only what is not done runs, and finished sections come from the cache |
+| `bgr runs TARGET` | a book's runs: status, variants done, model calls, why one stopped |
 | `bgr catalog [TARGET]` | refresh `catalog.json` for one book or the whole library |
 | `bgr list` | presses, books, chapters |
 | `bgr migrate REPO [--press P] [--book SLUG] [--adapter A]` | import a `cb-*` concept-book repo: chapters, pages, navigators, and its spl3 cache as `legacy_cache:` |
@@ -69,4 +71,4 @@ TARGET is a `book.yaml`, a book folder, or `press/book` under the library.
 
 Packaging, validation, generation, the catalog, `migrate` and `export` are done and tested with a scripted model (no LLM
 calls in tests). `migrate` then `export` reproduces each `cb-*` repo's `public/domains/` file for file. Not yet:
-ingestion/extraction from PDFs (concept-book-press), and resumable book runs. See `docs/` and `concept-book/docs/DEV/readme-book-graph-plan.md`.
+ingestion/extraction from PDFs (concept-book-press). See `docs/` and `concept-book/docs/DEV/readme-book-graph-plan.md`.

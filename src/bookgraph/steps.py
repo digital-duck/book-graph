@@ -75,9 +75,14 @@ def prepare(i: dict[str, Any]) -> dict[str, Any]:
             "write_ok": write_root_ok(i["output_dir"], roots) and write_root_ok(i["cache_dir"], roots)}
 
 
+def _fresh(i: dict[str, Any]) -> float:
+    return float(i.get("fresh_after") or 0)
+
+
 def _legacy(i: dict[str, Any], key: str, context: str) -> str | None:
-    """The SPL apps' cached text for `key` (bookgraph.legacy), when a legacy cache is given and the cache is not skipped."""
-    if i.get("skip_cache") or not i.get("legacy_cache"):
+    """The SPL apps' cached text for `key` (bookgraph.legacy), when a legacy cache is given and the cache is not skipped (a
+    `fresh_after` run skips it too: its entries are older than any run)."""
+    if i.get("skip_cache") or _fresh(i) or not i.get("legacy_cache"):
         return None
     return legacy_get(i["legacy_cache"], key, legacy_params(i["language"], i["style"], model_dir_name(i.get("model", "")), context))
 
@@ -89,7 +94,7 @@ def round_(i: dict[str, Any]) -> dict[str, Any]:
     node = order[int(i["node_index"])]
     context, label = g.context(node), g.label(node, i["language"])
     key_ctx = f"{label}\n{context}"                     # both reach the prompt, so both are in the key
-    hit = None if i.get("skip_cache") else cache_get(i["cache_dir"], node, _params(i, g, key_ctx))
+    hit = None if i.get("skip_cache") else cache_get(i["cache_dir"], node, _params(i, g, key_ctx), _fresh(i))
     source = "cache" if hit is not None else ""
     if hit is None and (hit := _legacy(i, node, context)) is not None:
         source = "legacy"
@@ -135,7 +140,7 @@ def payoff_round(i: dict[str, Any]) -> dict[str, Any]:
     apps = ", ".join(g.label(a, lang) for a in g.applications_of(target)) or "none"
     label = g.label(target, lang)
     key_ctx = "\n".join((label, ctx, prereqs, apps))     # the payoff prompt carries all four
-    hit = None if i.get("skip_cache") else cache_get(i["cache_dir"], target + "__payoff", _params(i, g, key_ctx))
+    hit = None if i.get("skip_cache") else cache_get(i["cache_dir"], target + "__payoff", _params(i, g, key_ctx), _fresh(i))
     if hit is None:                                      # the SPL app's payoff, keyed on the target's context alone (read each run)
         hit = _legacy(i, target + "__payoff", ctx)
     out.update(target_label=label, target_context=ctx, prereqs=prereqs, apps=apps, key_ctx=key_ctx,

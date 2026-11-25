@@ -839,3 +839,67 @@ the **same endpoints and shapes**, so `web/` is unchanged:
   its `/api` proxy pointed at `serve` does **not** work as is: the proxy forwards the dev server's `Origin` and `Host`
   (localhost:5173), which `serve`'s checks refuse. Supporting it needs an explicit opt-in, such as
   `--dev-origin http://localhost:5173`. Not done yet.
+
+---
+
+## 15. Build plan, step 8: resumable book runs (Opus 5.5, 2026-11-25)
+
+### 15.1 What GraphLang's checkpoints can and cannot do here
+
+The plan expected resumability "for free" from GraphLang's `checkpoint`/`resume`. GraphLang's guide is explicit, though:
+**"A LOOP or BATCH counts as one step, so a failure inside one re-runs that node."** `generate_chapter` is essentially one
+LOOP over the sections, so a checkpoint cannot resume mid-chapter.
+
+The section cache already does what is needed. `store` caches each section as soon as it is written, so re-running a
+failed chapter pays only for the sections it had not reached. **Measured:** a model that died after 3 of 6 calls, then a
+re-run, cost 3 calls, not 6; the manifest showed `cache` for the finished sections and `generated` for the rest. So
+checkpoints are not used, and the resumable unit is a book run.
+
+### 15.2 What was added
+
+- **A run ledger** (`runs.py`), `<book>/.bg_runs/<run id>.json`. Every chapter × level × language × model variant is
+  listed with its status (pending, running, done, failed, interrupted), its model calls and its error. The ledger is
+  written atomically after each variant.
+  - `bgr generate … --resume last|<id>` runs only what is not done, with the run's own options. Selection options are
+    refused with `--resume`; only `--budget` is allowed, to raise a spent budget.
+  - `bgr runs TARGET` lists a book's runs.
+- **`--budget N`** caps the model calls of the whole run, across resumes. Each variant gets `min(--max-llm-calls, what
+  is left)`.
+- **The run stops after 2 failed variants in a row.** The model is then likely down or rate-limited, and pressing on would
+  only burn calls and time. The rest stays `pending`.
+- **Ctrl-C** marks the running variant `interrupted`, saves the ledger and the catalog, prints the `--resume` command and
+  exits with 130.
+- **Retries in the recipe.** `write`, `refine` and `p_write` have `phases: {exec: {retry: {max: 2, wait_s: 15, on:
+  [transient]}}}`, GraphLang's own lifecycle: an adapter or OS error is retried, and a configuration error (`ValueError`)
+  is not. This replaces press's "rate_limited → retry".
+- **A `--skip-cache` that survives a resume.** It now means "ignore cache entries written before this run started"
+  (`fresh_after`, a new recipe input checked in `cache_get`; the legacy cache is skipped too). A resumed `--skip-cache`
+  run therefore reuses the sections *it* already regenerated, and still ignores the older ones. A plain skip would have
+  paid for them twice.
+- **Fix: a failed variant now reports the model calls it spent**, read from `RecipeError.summary`. It used to report 0.
+
+### 15.3 Verified
+
+- **`tests/test_runs.py`** (6 tests):
+  - a run that fails part-way resumes and pays only for the unfinished sections (6 − 3);
+  - done variants are skipped, and two failures in a row stop the run with the last variant pending (`done, failed,
+    failed, pending`), after which a resume runs exactly zh, fr and de;
+  - the budget stops the run, a resume on the same budget makes no progress, and raising it finishes the run;
+  - `--skip-cache` across a resume reuses this run's 2 sections and redoes the 4 older ones;
+  - a transient error (`RuntimeError` "429") is retried by the recipe, so the run succeeds with one extra call;
+  - the CLI: `generate`, `runs`, `--resume` with other options refused, an unknown run, and a done run.
+- **A real Ctrl-C:** SIGINT to `bgr generate --llm mock` on a 4-language book gave exit 130, the resume hint, and the
+  ledger `done, done, interrupted, pending`. `--resume last` finished the other two and the run ended `done 4/4`.
+- `pytest`: 81 passed, plus 2 opt-in, in about 3 minutes; `graf validate` passes.
+
+### 15.4 Notes
+
+- **Failed attempts count.** GraphLang's meter counts a failed attempt as a model call (a failed request may still be
+  billed), and so do the ledger and the budget.
+- **Calls lost on Ctrl-C.** The model calls an *interrupted* variant made before Ctrl-C are not recorded, because the
+  interruption arrives before GraphLang returns its summary. In the test above the ledger said 15 calls where about 16
+  were made. This only matters for `--budget` accuracy after a Ctrl-C.
+- **The retry wait is fixed** at 15 s, with no backoff, in the recipe. A longer outage ends with the stop-after-2 rule
+  and a later `--resume`.
+- **Still open:** ingestion and extraction (plan Phase 4), replay checks and `verify_section`, and the extra `validate`
+  checks (§9.2 items 6–7).
