@@ -57,6 +57,7 @@ class Book:
     publish: dict[str, Any] = field(default_factory=dict)   # {repo | remote, branch, cname}: bookgraph.publish
     root: Path = field(default_factory=Path)          # the folder holding book.yaml
     legacy_cache: str = ""                            # absolute path of an SPL app's `spl/.spl` cache folder (bookgraph.legacy), or ""
+    recap_earlier_chapters: bool = True               # a node an earlier chapter introduced gets a recap note (bookgraph.registry)
 
     def chapter(self, chapter_id: str) -> Chapter:
         for c in self.chapters:
@@ -123,7 +124,8 @@ def load_book(path: str | Path) -> Book:
                 tags=[str(x) for x in raw.get("tags") or []], source=dict(raw.get("source") or {}), site=dict(raw.get("site") or {}),
                 publish=dict(raw.get("publish") or {}),
                 root=p.parent.resolve(),
-                legacy_cache=str((p.parent / str(raw["legacy_cache"])).expanduser().resolve()) if raw.get("legacy_cache") else "")
+                legacy_cache=str((p.parent / str(raw["legacy_cache"])).expanduser().resolve()) if raw.get("legacy_cache") else "",
+                recap_earlier_chapters=bool(raw.get("recap_earlier_chapters", True)))
 
 
 def model_dir_name(model: str) -> str:

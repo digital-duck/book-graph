@@ -940,3 +940,52 @@ The plan lists "acyclic, reducible, connected, tiers". I measured each candidate
   `warnings` list.
 - New: `ChapterGraph.check_target()` and `warnings()`.
 - Tests: `tests/test_validate.py`, 4 tests.
+
+---
+
+## 17. Build plan, step 10: Phase 4, part 1: cross-chapter concept reuse (Opus 5.5, 2026-11-25)
+
+### 17.1 What press does, and where
+
+Phase 4 asks to "keep the cross-chapter concept registry … as deterministic steps". In concept-book-press it acts at
+**generate** time, not extraction. `pipeline/publish/registry.py` collects every node id of the earlier chapters (first
+chapter wins, plain id equality). For a node the current chapter re-declares, it appends a note to the node's `defines`
+text: "Already introduced in Chapter N as: '…' — treat as established prerequisite knowledge here; give a brief recap
+rather than a full re-derivation…". The LLM then recaps instead of re-deriving. book-graph's generation had no such step.
+
+### 17.2 What was added
+
+- **`registry.py`** builds the same registry over chapters in book.yaml order.
+  - "Chapter N" is the number in the chapter id (`ch03`, `calculus_ch03` → 3), else the chapter's position.
+  - `recap_note` is press's text **word for word**.
+  - `ChapterGraph.context(node, note)` places the note where press's augmented graph put it: after `defines`, before the
+    diagram hint.
+- **The builder** passes the registry to the recipe (new input `earlier`). `round` and `payoff_round` use the noted
+  context in the prompt and in this library's cache key.
+- **The legacy (spl3) lookup keeps the plain context,** because the SPL apps wrote their sections without the note. So a
+  migrated book's existing sections are still reused.
+- **On by default,** as in press's publish runs. A book can opt out with `recap_earlier_chapters: false`.
+
+### 17.3 Verified
+
+- `tests/test_registry.py` (4 tests):
+  - the registry rule (first chapter wins; nothing for chapter 1);
+  - the note's text and placement;
+  - **for every node, our context is byte-identical to what press's own `augment_graph_for_generation` gives** (that test
+    skips when concept-book-press is not checked out);
+  - generation sends the note only for the repeated node; the opt-out removes it, and only that node's section is
+    regenerated, because only its key changed.
+- **A real migrated chapter.** cb-meta-health `meta_health_ch03` repeats 11 concepts from earlier chapters (`dantian`,
+  `generating_cycle_xiangsheng`, …). With the registry on, it generated with **0 model calls**: all 24 sections came from
+  the legacy cache.
+- **A hypothesis ruled out.** I first suspected that the 4 cb-meta-health legacy entries that "miss" (§9.5) were
+  press-annotated sections. They are not: they match neither context. They are nodes whose definitions were edited
+  after generation, so a miss is correct.
+- `pytest`: 89 passed, plus 2 opt-in.
+
+### 17.4 Next in Phase 4
+
+- **`extract`** (chunks → graph.yaml) as a recipe: press's two passes, its YAML repair, a deterministic normalization
+  (a concept with no prerequisites becomes a primitive, which press documents as a manual fix; tiers computed from the
+  edges), and a validate-then-repair loop.
+- **`ingest`** (OpenStax HTML and PDF → chunks.yaml).

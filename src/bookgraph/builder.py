@@ -1,6 +1,7 @@
 """generate_chapter() / generate_book(): inputs, call cap and a result the CLI prints, over the generate_chapter recipe."""
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,6 +14,7 @@ from .graph import load_graph
 from .levels import resolve_style
 from .paths import variant_dir
 from .run import RecipeError, run_recipe
+from .registry import earlier_concepts
 from .runs import Run, Variant, load, new_run, save
 from .steps import write_roots_from_env
 
@@ -67,7 +69,8 @@ def generate_chapter(book: Book, chapter: Chapter, *, level: str, language: str,
               "level": level, "language": language, "model": model if isinstance(model, str) else "", "chapter_title": chapter.title,
               "output_dir": str(out), "cache_dir": str(root / ".bg_cache"), "skip_cache": skip_cache,
               "primitive_budget": primitive_budget, "subject": f"{book.book} {' '.join(book.tags)}".strip(),
-              "write_roots": write_roots_from_env(), "legacy_cache": book.legacy_cache, "fresh_after": float(fresh_after)}
+              "write_roots": write_roots_from_env(), "legacy_cache": book.legacy_cache, "fresh_after": float(fresh_after),
+              "earlier": json.dumps(earlier_concepts(book, chapter), ensure_ascii=False)}
     kw: dict[str, Any] = {}
     if log_dir is not None:
         kw["log_dir"] = log_dir

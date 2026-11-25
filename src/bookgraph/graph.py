@@ -76,12 +76,13 @@ class ChapterGraph:
     def has_label(self, node_id: str, lang: str) -> bool:
         return bool((self.node(node_id).get("labels") or {}).get(lang))
 
-    def context(self, node_id: str) -> str:
-        """The node's own `defines` (the "surrounding context" of its section), with its diagram hint appended."""
+    def context(self, node_id: str, note: str = "") -> str:
+        """The node's own `defines` (the "surrounding context" of its section), then `note` (an earlier chapter's recap note,
+        bookgraph.registry), then its diagram hint: the order concept-book-press's augmented graphs gave the SPL."""
         n = self.node(node_id)
         if not n:
             return node_id
-        text = n.get("defines") or node_id
+        text = (n.get("defines") or node_id) + note
         d = n.get("diagram")
         if d:
             text += f" [Diagram: {d.get('type', 'auto')} — {d.get('hint', '')}]"

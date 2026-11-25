@@ -6,6 +6,7 @@ without `in_`; stdout: one JSON value). A graph that cannot be generated from st
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -13,6 +14,7 @@ from typing import Any
 
 from .cache import cache_get, cache_put
 from .legacy import legacy_get, legacy_params
+from .registry import recap_note
 from .book import model_dir_name
 from .exceptions import BookError
 from .graph import ChapterGraph, language_name, load_graph, section_params
@@ -87,16 +89,25 @@ def _legacy(i: dict[str, Any], key: str, context: str) -> str | None:
     return legacy_get(i["legacy_cache"], key, legacy_params(i["language"], i["style"], model_dir_name(i.get("model", "")), context))
 
 
+def _note(i: dict[str, Any], node: str) -> str:
+    """The recap note for a node an earlier chapter already introduced (bookgraph.registry), or ""."""
+    try:
+        earlier = json.loads(i.get("earlier") or "{}")
+    except ValueError:
+        return ""
+    return recap_note(earlier[node]) if node in earlier else ""
+
+
 def round_(i: dict[str, Any]) -> dict[str, Any]:
     """Section `node_index`: which node, its label and context, and the cached section when there is one: this library's
     cache first, then the SPL app's (`legacy_cache`), whose hit `store` copies into this library's cache."""
     g, order, _ = _plan(i)
     node = order[int(i["node_index"])]
-    context, label = g.context(node), g.label(node, i["language"])
+    context, label = g.context(node, _note(i, node)), g.label(node, i["language"])
     key_ctx = f"{label}\n{context}"                     # both reach the prompt, so both are in the key
     hit = None if i.get("skip_cache") else cache_get(i["cache_dir"], node, _params(i, g, key_ctx), _fresh(i))
     source = "cache" if hit is not None else ""
-    if hit is None and (hit := _legacy(i, node, context)) is not None:
+    if hit is None and (hit := _legacy(i, node, g.context(node))) is not None:   # the SPL apps wrote it without the note
         source = "legacy"
     return {"node": node, "label": label, "context": context, "key_ctx": key_ctx, "hit": hit is not None, "cached": hit or "",
             "source": source or "generated"}
@@ -135,14 +146,14 @@ def payoff_round(i: dict[str, Any]) -> dict[str, Any]:
     if not needed:
         return out
     lang = i["language"]
-    ctx = g.context(target)
+    ctx = g.context(target, _note(i, target))
     prereqs = ", ".join(g.label(p, lang) for p in g.prerequisites(target)) or "none"
     apps = ", ".join(g.label(a, lang) for a in g.applications_of(target)) or "none"
     label = g.label(target, lang)
     key_ctx = "\n".join((label, ctx, prereqs, apps))     # the payoff prompt carries all four
     hit = None if i.get("skip_cache") else cache_get(i["cache_dir"], target + "__payoff", _params(i, g, key_ctx), _fresh(i))
     if hit is None:                                      # the SPL app's payoff, keyed on the target's context alone (read each run)
-        hit = _legacy(i, target + "__payoff", ctx)
+        hit = _legacy(i, target + "__payoff", g.context(target))
     out.update(target_label=label, target_context=ctx, prereqs=prereqs, apps=apps, key_ctx=key_ctx,
                hit=hit is not None, cached=hit or "")
     return out
