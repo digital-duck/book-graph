@@ -33,7 +33,7 @@ Repository = "https://github.com/digital-duck/book-graph"
 
 [project.optional-dependencies]
 dev = ["pytest>=7.4"]
-ingest = ["pymupdf>=1.24"]   # AGPL-3.0: optional, imported only by `bookgraph ingest`
+ingest = ["dd-extract[chapters]>=0.2.0"]   # the PDF reading is dd-extract's; its PyMuPDF extra is AGPL-3.0, so optional, imported only by `bookgraph ingest`
 
 [project.scripts]
 bookgraph = "bookgraph.cli:main"

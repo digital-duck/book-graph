@@ -316,11 +316,11 @@ def serve(library: Path, target: str, port: int, no_build: bool, out: str) -> No
 @_guard
 def ingest(library: Path, target: str, pdf: str, number, cid: str, list_only: bool, attribution, force: bool) -> None:
     """Read one chapter of a PDF textbook into the book: <chapter>/chunks.yaml, one chunk per section (concept-book-press's
-    PDF ingester), and the chapter in book.yaml. Then `bookgraph extract`. Needs PyMuPDF: pip install "book-graph[ingest]"."""
+    PDF ingester), and the chapter in book.yaml. Then `bookgraph extract`. Needs dd-extract with its PyMuPDF extra: pip install "book-graph[ingest]"."""
     try:
         from . import ingest as ing
     except ImportError as e:
-        raise click.ClickException(f"bookgraph ingest needs PyMuPDF ({e}): pip install \"book-graph[ingest]\"")
+        raise click.ClickException(f"bookgraph ingest needs dd-extract[chapters] ({e}): pip install \"book-graph[ingest]\"")
     if list_only:
         for num, title, page in ing.list_chapters(pdf):
             click.echo(f"{num:3d}  p.{page:<5d} {title}")

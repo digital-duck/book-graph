@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased
+- `bookgraph ingest` reads the PDF through dd-extract (`dd_extract.chapters`, 0.2.0); the `ingest` extra is `dd-extract[chapters]` instead of PyMuPDF. The OpenStax default attribution stays here.
+
 ## 0.1.0 (unreleased)
 - Package `bookgraph`, CLI `bookgraph` / `bgr`: `new`, `validate`, `order`, `generate`, `catalog`, `list`.
 - press > book > chapter model (`book.yaml`); ConceptBook `graph.yaml` unchanged.
