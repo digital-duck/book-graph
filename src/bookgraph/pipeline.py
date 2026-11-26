@@ -289,9 +289,9 @@ def _build(book: Book, ch: None, prev: Optional[dict], llm: Any) -> tuple[str, s
 
 
 def _publish(book: Book, ch: None, prev: Optional[dict], llm: Any) -> tuple[str, str, dict]:
-    from .publish import publish_site
-    res = publish_site(book, book.root / "dist")                  # the approval of 5-build is the confirmation
-    return OK, res["summary"], {"commit": res["commit"]}
+    """A no-op: the library is the back office of conceptbook-app, which pulls the content from it (docs/GUIDE/Library-Contract.md),
+    so nothing is pushed to GitHub. `bookgraph publish` still builds and pushes a book's site when asked directly."""
+    return OK, "nothing to publish: conceptbook-app reads the library (see docs/GUIDE/Library-Contract.md)", {"noop": True}
 
 
 RUNNERS: dict[str, Callable[..., tuple[str, str, dict]]] = {
@@ -316,7 +316,7 @@ def run_step(book: Book, step: str, chapter: Optional[Chapter] = None, *, llm: A
         error = "" if status == OK else summary
     except Exception as e:                                         # a failure is a NOT_OK manifest, never a missing one
         status, summary, details, error = NOT_OK, f"{type(e).__name__}: {e}", {}, f"{type(e).__name__}: {e}"
-    auto = step in (book.pipeline.get("auto_approve") or [])
+    auto = step in (book.pipeline.get("auto_approve") or []) or bool(details.get("noop"))
     m.update(status=status, finished=_now(), summary=summary, error=error, details=details,
              review={"status": "approved" if status == OK and auto else "pending",
                      **({"by": "auto_approve", "at": _now()} if status == OK and auto else {})})
@@ -355,6 +355,24 @@ def _running(book: Book) -> int:
                and _alive((read_manifest(book, t.step, t.chapter) or {}).get("pid")))
 
 
+def spawn(book: Book, library: Path, t: Task) -> int:
+    """Start one step in the background (`bookgraph pipeline-step`), leaving a RUNNING placeholder manifest. Returns its pid."""
+    log = log_path(book, t.step, t.chapter)
+    log.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [sys.executable, "-m", "bookgraph.cli", "-L", str(library), "pipeline-step", str(book.root), t.step]
+    if t.chapter:
+        cmd += ["-c", t.chapter.id]
+    with open(log, "a", encoding="utf-8") as fh:
+        fh.write(f"\n== {_now()} {t.name}\n")
+        fh.flush()
+        proc = subprocess.Popen(cmd, stdout=fh, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
+    prev = read_manifest(book, t.step, t.chapter)
+    write_manifest(book, {"step": t.step, "book": f"{book.press}/{book.book}", "chapter": t.chapter.id if t.chapter else None,
+                          "run": "starting", "status": RUNNING, "pid": proc.pid, "started": _now(),
+                          "inputs": inputs_of(book, t.step, t.chapter), "previous": prev}, t.chapter)
+    return proc.pid
+
+
 def dispatch(book: Book, library: Path, *, parallel: int = 2, foreground: bool = False, dry_run: bool = False,
              llm: Any = None) -> list[Task]:
     """Start every ready step (up to `parallel` running at once) and return them. In the background unless `foreground`.
@@ -371,20 +389,57 @@ def dispatch(book: Book, library: Path, *, parallel: int = 2, foreground: bool =
         if foreground:
             run_step(book, t.step, t.chapter, llm=llm)
             continue
-        log = log_path(book, t.step, t.chapter)
-        log.parent.mkdir(parents=True, exist_ok=True)
-        cmd = [sys.executable, "-m", "bookgraph.cli", "-L", str(library), "pipeline-step", str(book.root), t.step]
-        if t.chapter:
-            cmd += ["-c", t.chapter.id]
-        with open(log, "a", encoding="utf-8") as fh:
-            fh.write(f"\n== {_now()} {t.name}\n")
-            fh.flush()
-            proc = subprocess.Popen(cmd, stdout=fh, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
-        prev = read_manifest(book, t.step, t.chapter)
-        write_manifest(book, {"step": t.step, "book": f"{book.press}/{book.book}", "chapter": t.chapter.id if t.chapter else None,
-                              "run": "starting", "status": RUNNING, "pid": proc.pid, "started": _now(),
-                              "inputs": inputs_of(book, t.step, t.chapter), "previous": prev}, t.chapter)
+        spawn(book, library, t)
     return started
+
+
+# ── the whole pipeline, synchronously ───────────────────────────────────────────────────────────────────────────────
+
+def run_pipeline(root: Path, *, auto_approve: bool = True, until: Optional[str] = None, chapters: Optional[list[str]] = None,
+                 llm: Any = None, log: Callable[[str], None] = lambda m: None) -> dict[str, Any]:
+    """Run every step that is ready, one after another and in this process, until nothing is: the synchronous `bookgraph next`.
+
+    `auto_approve` approves each step that ends OK (the default; review the results afterwards, or pass False to stop at the
+    first step that needs a human). `until` stops after that step (and runs no step after it); `chapters` limits the chapter
+    steps to those chapters (book steps wait for all of the book's chapters as ever). A step that ends NOT_OK is not run
+    again here, and what depends on it waits. Returns {"ran": [[name, status]...], "stopped": why, "ok": bool}."""
+    if until is not None and until not in STEPS:
+        raise BookError(f"unknown step {until!r}: one of {', '.join(STEPS)}")
+    ran: list[list[str]] = []
+    done: set[str] = set()                                   # a step runs once per pipeline run: no loop on a flapping input
+    failed = False
+    while True:
+        book = load_book(root)
+        unknown = [c for c in (chapters or []) if c not in {ch.id for ch in book.chapters}]
+        if unknown:
+            raise BookError(f"no chapter {', '.join(unknown)} in {book.press}/{book.book}")
+        todo = [t for t in ready_tasks(book) if t.name not in done
+                and (until is None or STEPS.index(t.step) <= STEPS.index(until))
+                and (not chapters or t.chapter is None or t.chapter.id in chapters)]
+        if not todo:
+            break
+        t = todo[0]
+        done.add(t.name)
+        log(f"run {t.name}")
+        m = run_step(book, t.step, t.chapter, llm=llm)
+        ran.append([t.name, m["status"]])
+        if m["status"] != OK:
+            failed = True
+            log(f"{t.name}: {m['status']}: {m.get('summary', '')}")
+            continue
+        log(f"{t.name}: OK: {m.get('summary', '')}")
+        if auto_approve and (m.get("review") or {}).get("status") != "approved":
+            review(book, t.step, t.chapter, "approve", by="auto (bookgraph pipeline)")
+    book = load_book(root)
+    waiting = [f"{t.name} ({readiness(book, t.step, t.chapter)[1]})" for t in tasks(book)
+               if readiness(book, t.step, t.chapter)[1] in ("awaiting review", "rejected: run again", "NOT_OK: fix its input, or bookgraph retry")]
+    if failed:
+        stopped = "a step failed"
+    elif waiting:
+        stopped = "waiting for review: " + ", ".join(waiting)
+    else:
+        stopped = "nothing more is ready"
+    return {"ran": ran, "stopped": stopped, "ok": not failed}
 
 
 def status_rows(book: Book) -> list[dict[str, Any]]:

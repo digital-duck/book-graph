@@ -6,8 +6,8 @@ import sys
 from pathlib import Path
 
 import click
+from zinet.click_helpers import HELP_OPTION_NAMES, FullHelpGroup, version_option
 
-from . import __version__
 from .book import load_book, scaffold_book
 from .builder import generate_book
 from .catalog import register_book, scan_library
@@ -44,8 +44,8 @@ def _find_book(target: str, library: Path) -> Path:
     raise BookError(f"no book at {target!r} (give a book.yaml, a folder, or press/book under {library})")
 
 
-@click.group(context_settings={"help_option_names": ["-h", "--help"]})
-@click.version_option(__version__, prog_name="bookgraph")
+@click.group(cls=FullHelpGroup, context_settings={"help_option_names": HELP_OPTION_NAMES})
+@version_option("book-graph", "bookgraph")
 @click.option("--library", "-L", envvar="BOOKGRAPH_LIBRARY", default=None, help="the library root (default ~/book-graph/library)")
 @click.pass_context
 def main(ctx: click.Context, library: str | None) -> None:
@@ -432,6 +432,30 @@ def next_(library: Path, target: str, parallel: int, foreground: bool, dry_run: 
 
 @main.command()
 @click.argument("target")
+@click.option("--auto-approve-on-success/--no-auto-approve", default=True, show_default=True,
+              help="approve each step that ends OK, so the next one starts at once; --no-auto-approve stops at the first step that needs review")
+@click.option("--until", "until", default=None, metavar="STEP", help="stop after this step (1-ingest .. 6-publish)")
+@click.option("--chapter", "-c", "chapters", multiple=True, help="only these chapters' steps (repeatable)")
+@click.option("--llm", "model", default="", help="ADAPTER:MODEL for the model steps (default: the book's first model)")
+@click.pass_obj
+@_guard
+def pipeline(library: Path, target: str, auto_approve_on_success: bool, until: str | None, chapters: tuple, model: str) -> None:
+    """Run a book's whole pipeline here, step after step, until nothing more is ready: the synchronous `bookgraph next`.
+
+    Each step that ends OK is approved on the spot (--no-auto-approve to review each one yourself: it stops at the first).
+    A step that fails stops what depends on it; fix it and run again, finished steps are not repeated. Model steps (2-extract,
+    4-generate) are billed, and nobody reviews them in between: use --until 3-validate to look at the graph first."""
+    from .pipeline import run_pipeline
+    root = _find_book(target, library)
+    res = run_pipeline(root, auto_approve=auto_approve_on_success, until=until, chapters=list(chapters) or None,
+                       llm=model or None, log=click.echo)
+    click.echo(f"{len(res['ran'])} step(s) run; {res['stopped']}")
+    if not res["ok"]:
+        sys.exit(1)
+
+
+@main.command()
+@click.argument("target")
 @click.pass_obj
 @_guard
 def status(library: Path, target: str) -> None:
@@ -510,6 +534,24 @@ def pipeline_step(library: Path, book_dir: str, step: str, chapter: str) -> None
     click.echo(f"{m['status']}: {m.get('summary', '')}")
     if m["status"] != "OK":
         sys.exit(1)
+
+
+@main.command()
+@click.option("--port", "-p", type=int, default=8501, show_default=True, help="the Streamlit port")
+@click.argument("streamlit_args", nargs=-1, type=click.UNPROCESSED)
+@click.pass_obj
+@_guard
+def ui(library: Path, port: int, streamlit_args: tuple) -> None:
+    """Open the pipeline as a web app (Streamlit): run each step, review what it made, approve or reject it, and preview the
+    built site. The same manifests as `bookgraph status`/`approve`."""
+    import importlib.util
+    import os
+    if importlib.util.find_spec("streamlit") is None:
+        raise click.ClickException("Streamlit is not installed: pip install -e . (it is a dependency of book-graph)")
+    from . import ui as ui_module
+    env = dict(os.environ, BOOKGRAPH_LIBRARY=str(library))
+    os.execvpe(sys.executable, [sys.executable, "-m", "streamlit", "run", ui_module.__file__, "--server.port", str(port),
+                                "--server.address", "127.0.0.1", "--browser.gatherUsageStats", "false", *streamlit_args], env)
 
 
 @main.command(name="list")

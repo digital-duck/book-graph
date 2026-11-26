@@ -51,9 +51,9 @@ def test_path_a_runs_step_by_step_and_waits_for_review_at_every_step(book, libra
     approve(book, "4-generate")
     assert tick(book, library) == ["5-build"]
     approve(book, "5-build")
-    assert tick(book, library) == ["6-publish"]
-    assert pl.read_manifest(book, "6-publish")["summary"] == "pushed (stub)"
-    approve(book, "6-publish")
+    assert tick(book, library) == ["6-publish"]                               # a no-op, approved by itself: nothing is pushed
+    m = pl.read_manifest(book, "6-publish")
+    assert m["status"] == "OK" and m["details"] == {"noop": True} and m["review"]["status"] == "approved"
     assert tick(book, library) == []
     path = book.root / "pipeline" / "ch01" / "3-validate.out.yaml"
     assert path.is_file() and yaml.safe_load(path.read_text())["review"]["by"] == "tester"
@@ -167,3 +167,39 @@ def test_background_dispatch_and_the_cli(library):
     assert "READY" in run("status", "acme/demo").output.splitlines()[1]
     assert run("approve", "acme/demo", "5-build", "-c", "ch01").exit_code == 2         # a book step takes no -c
     assert run("approve", "acme/demo", "4-generate", "-c", "ch01").exit_code == 1      # has not run
+
+
+def test_run_pipeline_runs_every_step_and_approves_each_ok_step(book, library):
+    res = pl.run_pipeline(book.root, llm=Scripted())
+    assert res["ok"] and [r[0] for r in res["ran"]] == ["3-validate ch01", "4-generate ch01", "5-build", "6-publish"]
+    assert res["stopped"] == "nothing more is ready"
+    b = load_book(book.root)
+    assert all(pl.readiness(b, t.step, t.chapter) == (False, "done") for t in pl.tasks(b))
+    assert pl.read_manifest(b, "3-validate", b.chapters[0])["review"]["by"] == "auto (bookgraph pipeline)"
+    again = pl.run_pipeline(book.root, llm=Scripted())                         # nothing is repeated
+    assert again["ran"] == []
+
+
+def test_run_pipeline_without_auto_approve_stops_at_the_first_review(book, library):
+    res = pl.run_pipeline(book.root, auto_approve=False)
+    assert [r[0] for r in res["ran"]] == ["3-validate ch01"]
+    assert "waiting for review" in res["stopped"] and "3-validate ch01" in res["stopped"]
+
+
+def test_run_pipeline_until_and_failure(book, library):
+    res = pl.run_pipeline(book.root, until="3-validate")
+    assert [r[0] for r in res["ran"]] == ["3-validate ch01"]
+    g = book.graph_path(book.chapters[0])
+    g.write_text(g.read_text() + "  loop:\n    needs: [loop]\n    defines: x\n")
+    bad = pl.run_pipeline(book.root, llm=Scripted())
+    assert not bad["ok"] and bad["stopped"] == "a step failed" and [r[1] for r in bad["ran"]] == ["NOT_OK"]
+    with pytest.raises(Exception, match="unknown step"):
+        pl.run_pipeline(book.root, until="7-nope")
+
+
+def test_cli_pipeline(book, library):
+    r = CliRunner().invoke(main, ["-L", str(library), "pipeline", "acme/demo", "--no-auto-approve"])
+    assert r.exit_code == 0 and "run 3-validate ch01" in r.output and "waiting for review" in r.output
+    r = CliRunner().invoke(main, ["-L", str(library), "approve", "acme/demo", "3-validate", "-c", "ch01"])
+    r = CliRunner().invoke(main, ["-L", str(library), "pipeline", "acme/demo", "--until", "3-validate"])
+    assert r.exit_code == 0 and "0 step(s) run" in r.output

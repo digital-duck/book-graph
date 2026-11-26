@@ -7,7 +7,7 @@
 | Chapter | `ch15`, *Chapter 15 Equilibria of Other Reaction Classes*: the smallest chapter of the book (5 sections, 67,071 characters) |
 | Source | `~/projects/digital-duck/concept-book-press/input/chemistry-2e.pdf` (OpenStax, CC BY 4.0, 207.7 MB) |
 | Model | `claude_cli:claude-sonnet-5-5` (book.yaml `models:`); **billed from step 2 on** |
-| Status | **Step 1 (1-ingest) done, OK, awaiting your review.** Nothing after it has run; no model call has been made. |
+| Status | **Steps 1 to 5 done and approved; 6-publish not run on purpose.** 8 model calls in all. See section 5. |
 
 Why this chapter: every chapter of the two OpenStax PDFs was measured with book-graph's ingester. The smallest are chemistry-2e
 ch15 (67,071 characters), ch13 (68,518) and ch16 (70,590). Pass 1 of extraction sends the whole chapter to the model, so the smallest
@@ -208,8 +208,21 @@ bgr serve openstax/chemistry-2e         # http://127.0.0.1:8200/cb-chemistry-2e/
 
 ```bash
 bgr next openstax/chemistry-2e --foreground                   # 5-build -> <book>/dist
+
+bgr serve openstax/chemistry-2e --no-build                    # preview the built site; Ctrl-C to stop
+
 bgr approve openstax/chemistry-2e 5-build -m "previewed"      # its approval is publish's confirmation
+
 ```
+
+**Preview before approving 5-build.** `bgr serve` runs in the foreground on `127.0.0.1:8200` (`-p` changes the port); open
+<http://127.0.0.1:8200/cb-chemistry-2e/> (the path is `site.base` in book.yaml).
+
+- `--no-build` serves the `dist/` that 5-build just made. Without it, `serve` rebuilds `dist/` first.
+- Check: the home page lists the book and chapter; the one generated page, `book_wastewater_phosphate_precipitation`, opens and
+  reads well; the navigator links work.
+- **Avoid the Generate button** on the other nodes: it makes billed model calls, which this test's call count does not expect.
+  Settings (API keys included) stay in memory only.
 
 **Do not run 6-publish in this test.** book.yaml has no `publish:` target, so 6-publish ends NOT_OK, saying there is nowhere to
 publish. That is expected, and harmless.
@@ -226,16 +239,24 @@ bgr catalog                                                                     
 
 To reproduce step 1 from scratch, repeat section 1.1, then `bgr next openstax/chemistry-2e`.
 
-## 5. Results (fill in as you go)
+## 5. Results
 
 | Step | Date | Status | Model calls | Review (approved / rejected, note) |
 |---|---|---|---:|---|
-| 1-ingest | 2026-11-25 | OK | 0 | pending: path (a) or (b)? |
-| 2-extract | | | | |
-| 3-validate | | | 0 | |
-| 4-generate | | | | |
-| 5-build | | | 0 | |
+| 1-ingest | 2026-11-25 | OK | 0 | approved 21:19, path (a): "accepted with exercises; see case-1 findings" |
+| 2-extract | 2026-11-25 | OK (34 s) | 2 | approved 21:23, "extract step passed"; no repair call needed |
+| 3-validate | 2026-11-25 | OK | 0 | approved 21:25; 23 nodes, no problems, no warnings; capstone not set |
+| 4-generate | 2026-11-25 | OK (75 s) | 6 | approved 21:29; one page built (see notes) |
+| 5-build | 2026-11-25 | OK | 0 | approved; site in `dist/` |
+| 6-publish | - | not run | - | skipped on purpose: book.yaml has no `publish:` target |
+
+Total: 8 model calls (`claude_cli:claude-sonnet-5-5`). The whole path B ran end to end, one step and one review at a time.
 
 Notes on the graph and pages, and on anything that went wrong:
 
--
+- Step 1 was accepted as it was, so findings 1 to 3 of section 2 (exercises included, sections leaking at page boundaries, math lost) were not fixed.
+- Step 2 used 2 calls, not the readme's estimate of about 3, because validation passed first time. It made a graph of 23 nodes and normalized one thing: `solubility_equilibrium` was a concept with no prerequisite, so it was moved to primitives.
+- Step 3 ran with no `capstone:` in book.yaml, so the last application in teaching order was used.
+- Step 4 built a single page, `book_wastewater_phosphate_precipitation.html` (variant `college.en`), not the whole chapter: 1 variant done, 6 calls. The estimate in section 3 ("one call per section plus the payoff") assumes a whole-chapter run and overstates a single-target run.
+- Step 5 built `dist/` with `index.html`, `assets/` and `domains/`.
+- Nothing went wrong: no repair, no retry, no resume.

@@ -61,13 +61,15 @@ chapters:
 | `bgr ingest TARGET --pdf FILE (--chapter N \| --list)` | one chapter of a PDF textbook -> `<chapter>/chunks.yaml`, and the chapter in book.yaml (needs `pip install "book-graph[ingest]"`) |
 | `bgr extract TARGET -c CHAPTER [--chunks FILE] [--llm A:M] [--force]` | a chapter's chunks.yaml -> its graph.yaml: two model passes, normalized, validated, repaired once |
 | `bgr next TARGET [--watch N] [--parallel N] [--foreground] [--dry-run]` | the asynchronous pipeline: start every step that is ready (see below) |
+| `bgr pipeline TARGET [--until STEP] [-c CH] [--no-auto-approve]` | the synchronous pipeline: run every step in turn here and approve each OK step (the default), until nothing more is ready |
+| `bgr ui [--port 8501]` | the pipeline as a Streamlit app: run steps, review what they made, approve or reject, and preview the built site |
 | `bgr status TARGET` | each chapter's steps and the book's, with what is ready and what waits for review |
 | `bgr approve/reject TARGET STEP [-c CHAPTER\|all] [-m NOTE]`, `bgr retry ...` | review a step's last run: approve lets the next step start; reject runs it again; retry reruns a NOT_OK one |
 | `bgr migrate REPO [--press P] [--book SLUG] [--adapter A]` | import a `cb-*` concept-book repo: chapters, pages, navigators, and its spl3 cache as `legacy_cache:` |
 | `bgr navigator TARGET [-c CHAPTER] [--force]` | write each chapter's navigator (`output/graph.html`) where it is missing or its graph changed |
 | `bgr build TARGET [--out DIR]` | the book as a static site: the one web app with the book's content and `site:` strings (needs npm) |
 | `bgr serve TARGET [--port 8200]` | the site on 127.0.0.1 with the local API: Generate, Export PDF and Settings work; pages appear live |
-| `bgr publish TARGET [--dry-run] [--yes] [--no-build]` | build, then push the site to `publish:` (GitHub Pages `gh-pages`) as one fresh commit, behind a policy check |
+| `bgr publish TARGET [--dry-run] [--yes] [--no-build]` | not part of the pipeline (6-publish is a no-op: see the library contract). Build, then push the site to `publish:` (GitHub Pages `gh-pages`) as one fresh commit, behind a policy check |
 | `bgr export TARGET DOMAINS` | write a book into a web app's `public/domains/` (graphs, pages, navigators, flat `catalog.json`) |
 
 TARGET is a `book.yaml`, a book folder, or `press/book` under the library.
@@ -85,7 +87,9 @@ its graph.yaml. Every step writes `<book>/pipeline/[<chapter>/]<step>.out.yaml`:
 inputs, and a review. `bgr next` starts, in the background, every step whose predecessor is OK, approved and current, and
 whose own manifest is missing, stale, rejected or marked for retry; run it by hand, from cron, or with `--watch`. Every
 step waits for `bgr approve` (`pipeline: {auto_approve: [3-validate]}` in book.yaml lets a step through); a NOT_OK step
-runs again once its input is fixed or `bgr retry` marks it.
+runs again once its input is fixed or `bgr retry` marks it. `bgr pipeline` does the same in one go, in the foreground, approving each
+step that ends OK; `bgr ui` is the step-by-step version with human review and a preview of the built site. 6-publish is a no-op:
+book-graph is the back office of conceptbook-app, which reads the library ([docs/GUIDE/Library-Contract.md](docs/GUIDE/Library-Contract.md)).
 
 ## Status
 

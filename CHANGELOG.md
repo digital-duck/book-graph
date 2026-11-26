@@ -27,3 +27,7 @@
 - The asynchronous pipeline: `1-ingest 2-extract 3-validate 4-generate 5-build 6-publish`, each writing `STEP.out.yaml` (status, input fingerprints, review); `bgr next` dispatches ready steps in the background; review at every step (`bgr approve/reject/retry`, `bgr status`); path A (an authored graph) and path B (`source: {pdf, chapter}`).
 - Documentation: `docs/GUIDE/` Setup, Tutorial (run end to end; its output is real) and User Guide; `docs/DEMO/book-graph-v1.demo.html`, a 23-slide deck in the family's format.
 - A damaged `catalog.json` is refused, not overwritten; unique temp files in the cache; one-pass page templating; `press/book` beats a same-named local folder (B13).
+- `6-publish` is a no-op (approved by itself): the library is read by conceptbook-app (`docs/GUIDE/Library-Contract.md`); `bgr publish` stays for a standalone site.
+- `bgr pipeline`: the synchronous pipeline (`run_pipeline`): runs each ready step in turn and approves each OK step (`--no-auto-approve` to stop at the first review; `--until STEP`, `-c CHAPTER`).
+- `bgr ui`: a Streamlit app: pipeline table, per-step review (chunks, graph, generated pages, log, manifest) with Approve / Reject / Retry, and a preview of the built site once 5-build is OK.
+- The domain page no longer draws the source/attribution row (it showed `undefined` for a book with only a licence); it belongs on the About page.

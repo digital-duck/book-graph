@@ -70,18 +70,7 @@ export async function Domain(container, { id } = {}) {
 
   if (!id || !domain) return
 
-  if (domain.source) {
-    const attr = document.createElement('div')
-    attr.className = 'cb-attribution'
-    const { url, title, authors, license, attribution } = domain.source
-    const line = document.createElement('span')
-    i18n(line, 'domain.source', {
-      attr: 'innerHTML',
-      vars: { link: `<a href="${url}" target="_blank">${title}</a>`, authors, license },
-    })
-    attr.append(line, ` ${attribution}`)
-    page.appendChild(attr)
-  }
+  // The source attribution is not shown here: it belongs on the About page.
 
   const level = domain.default_level || appConfig.defaultLevel
   // Content language starts at the top-bar (UI) language; the content panel's
