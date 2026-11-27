@@ -206,7 +206,7 @@ with tab_preview:
                 ui.stop_preview(pv["pid"])
                 st.session_state.pop("preview", None)
                 st.rerun()
-            components.iframe(url, height=760, scrolling=True)
+            components.iframe(url, height=950, scrolling=True)
 
 # ── Library ────────────────────────────────────────────────────────────────────────────────────────────────────────
 

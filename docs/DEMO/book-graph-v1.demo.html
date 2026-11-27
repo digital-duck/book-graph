@@ -101,7 +101,7 @@
 <section class="slide">
   <div style="margin:auto 0">
     <h1>book-graph</h1>
-    <p class="big">Concept books from concept graphs, on GraphLang</p>
+    <p class="big">From concept-graphs to self-guided learning</p>
     <p class="sub">press &gt; book &gt; chapter · one engine, one web app, every book</p>
     <p class="quiet" style="margin-top:3.2em"><a href="mailto:wen.gong.research@gmail.com" style="color:inherit">wen.gong.research@gmail.com</a></p>
   </div>
@@ -144,23 +144,26 @@
 </section>
 
 <section class="slide">
-  <h2>The problem: one forked repo per book</h2>
+  <h2>The problem: textbooks are costly, static and linear</h2>
   <div class="cols">
-    <ul>
-      <li>Each <code>cb-*</code> book forked the whole app: frontend, FastAPI backend, SPL workflow, scripts.</li>
-      <li>A book is really <b>graph.yaml + settings + generated pages</b>; the rest is copied boilerplate.</li>
-      <li>The copies <b>drift</b>. A fix must be ported by hand to every repo.</li>
-      <li>Publishing is per-repo glue: sync scripts, <code>.env</code>, deploy scripts.</li>
-    </ul>
     <div class="card stack">
-      <h3>Measured across the repos</h3>
-      <div><b>13</b> cb repos (cb-zinets aside), <b>260</b> chapter graphs</div>
-      <div><b>6</b> different copies of the navigator generator <code>concept_graph.py</code></div>
-      <div>cb-calculus, cb-linalg, cb-chemistry, cb_biology run an <b>older frontend</b> (≈700 lines apart)</div>
-      <div>generation: a 400-line SPL file shelled out from the API</div>
+      <h3>Publisher side</h3>
+      <div><b>Costly to make</b>: authors, editors, layout, print runs and distribution.</div>
+      <div><b>Hard to update</b>: a correction or a new topic waits for the next edition, often years away.</div>
+      <div><b>Hard to adapt</b>: one version for every level, language and course.</div>
+    </div>
+    <div class="card stack">
+      <h3>Learner side</h3>
+      <div><b>Inaccessible</b>: a high price keeps the book out of reach of many learners.</div>
+      <div><b>Linear</b>: content is a fixed run of chapters, though concepts depend on each other as a graph.</div>
+      <div><b>No guide</b>: nothing says what to learn first, or what is missing before this chapter makes sense.</div>
     </div>
   </div>
-  <aside class="notes">The plan's diagnosis, confirmed while building: the navigator script exists in six versions, and most cb repos are on an older frontend than the template. A shared engine removes the drift by construction.</aside>
+  <ul>
+    <li>Underneath the pages is a <b>concept graph</b> that the printed book flattens and throws away.</li>
+    <li>If the graph is the source, a book can be <b>updated, adapted and generated</b> at a fraction of the cost.</li>
+  </ul>
+  <aside class="notes">The bigger problem comes before any tooling. Publishing is expensive and slow to change, so books cost the learner a lot and go stale. The page is linear, while understanding follows prerequisites, so a learner gets no learning path. The next slides show the idea: keep the concept graph as the source and generate the book from it. A technical symptom of the old way: each cb-* book forked the whole app, so there were 13 repos, 260 chapter graphs and six copies of the navigator generator that drifted apart. That is solved later, in the migration slide.</aside>
 </section>
 
 <section class="slide">
@@ -397,6 +400,32 @@ started 6-publish (log: …/pipeline/logs/6-publish.log)
 </section>
 
 <section class="slide">
+  <h2>The same pipeline as a web app</h2>
+<pre><span class="c">$ bgr ui</span>              <span class="c"># Streamlit, default port 8501</span>
+<span class="c">$ bgr ui -p 8600</span>       <span class="c"># another port</span></pre>
+  <div class="cols">
+    <ul>
+      <li><b>Run</b> each step from the page instead of the terminal.</li>
+      <li><b>Review</b> what the step made.</li>
+      <li><b>Approve or reject</b> it, with a note.</li>
+      <li><b>Preview</b> the built site before publish.</li>
+    </ul>
+    <div class="card stack">
+      <h3>No second state</h3>
+      <div>It reads and writes the <b>same manifests</b> as <code>bgr status</code> and <code>bgr approve</code>.</div>
+      <div class="quiet">approve in the browser, see it in the terminal, and the other way round</div>
+    </div>
+  </div>
+  <aside class="notes">bgr ui opens the pipeline as a Streamlit app. Extra arguments after the options are passed on to Streamlit. It adds no state of its own: the review gate is the manifest on disk, so the CLI, the UI and a background run always agree.</aside>
+</section>
+
+<section class="slide">
+  <h2>bgr ui: previewing a built book</h2>
+  <img src="bookgraph-ui.png" alt="bgr ui, Preview tab: the Chemistry 2e site with its concept graph, notes and a generated page" style="flex:1; min-height:0; max-width:100%; object-fit:contain; border:1px solid #c9ced8; border-radius:8px">
+  <aside class="notes">The Preview tab of bgr ui on openstax/chemistry-2e: the book's own site, served locally, with the concept graph and notes on the left and the generated page on the right. Tabs: Pipeline, Review, Preview, Library.</aside>
+</section>
+
+<section class="slide">
   <h2>One web app for every book</h2>
   <div class="cols">
     <ul>
@@ -563,7 +592,6 @@ bgr migrate ~/projects/digital-duck/cb-meta-health
     <li><a href="https://github.com/digital-duck/book-graph" target="_blank" rel="noopener">github.com/digital-duck/book-graph</a> · docs/GUIDE: Setup, Tutorial, User Guide</li>
     <li><a href="https://github.com/digital-duck/graflang" target="_blank" rel="noopener">github.com/digital-duck/graflang</a>: the GraphLang runtime</li>
     <li><a href="https://github.com/digital-duck/zinet" target="_blank" rel="noopener">github.com/digital-duck/zinet</a>: graph algorithms</li>
-    <li><a href="https://github.com/digital-duck/app-graph" target="_blank" rel="noopener">app-graph</a>, <a href="https://github.com/digital-duck/work-graph" target="_blank" rel="noopener">work-graph</a>: the other GraphLang apps</li>
     <li><a href="https://openstax.org" target="_blank" rel="noopener">openstax.org</a>: open textbooks (CC BY 4.0), the source of the extracted books</li>
   </ul>
   <p class="big center" style="margin-top:1.2em">Thank you</p>
