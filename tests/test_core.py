@@ -90,3 +90,26 @@ def test_catalog(library):
     ch = cat["presses"][0]["books"][0]["chapters"][0]
     assert ch["id"] == "ch01" and ch["concepts"] == 2 and ch["capstone"] == "budget" and ch["books"] == []
     assert scan_library(library)["presses"][0]["press"] == "acme"
+
+
+def test_md_table_becomes_a_table():
+    """A model's Markdown pipe table (any width) renders as a <table>, not one flattened paragraph."""
+    for ncols in (2, 3, 5):
+        head = "| " + " | ".join(f"H{c}" for c in range(ncols)) + " |"
+        sep = "|" + "---|" * ncols
+        rows = "\n".join("| " + " | ".join(f"r{r}c{c}" for c in range(ncols)) + " |" for r in range(2))
+        html = _md_to_html(f"Intro:\n\n{head}\n{sep}\n{rows}\n\nAfter.")
+        assert "---" not in html and html.count("<th ") == ncols and html.count("<td ") == 2 * ncols
+        assert "<p>Intro:</p>" in html and "<p>After.</p>" in html
+
+
+def test_md_table_keeps_inline_markup_and_alignment_and_skips_ragged():
+    html = _md_to_html("| A | B |\n|:---|---:|\n| **x** | `a\\|b` |\n")
+    assert "<strong>x</strong>" in html and "text-align: left" in html and "text-align: right" in html
+    ragged = _md_to_html("| A | B |\n|---|---|\n| only one |\n")
+    assert "<table" not in ragged                       # left as written, never guessed at
+
+
+def test_md_table_inside_code_is_untouched():
+    html = _md_to_html("```\n| A | B |\n|---|---|\n| 1 | 2 |\n```\n")
+    assert "<table" not in html and "|---|---|" in html

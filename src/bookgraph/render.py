@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import re
 
+from .tables import repair_tables
+
+
 def _esc(text: str) -> str:
     return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
@@ -154,7 +157,7 @@ def _md_to_html(md: str) -> str:
     flush_para()
     if raw_html_buf:                                   # a figure still open at the end of the text
         out.append(_safe_figure('\n'.join(raw_html_buf)))
-    return '\n'.join(out)
+    return repair_tables('\n'.join(out))   # the lines of a Markdown table join into one paragraph above; make them a <table>
 
 
 _SHARED_CSS = """\
